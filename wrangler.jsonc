@@ -1,5 +1,3 @@
-wrangler.jsonc
-
 {
   "name": "my-ghibli-site",
   "compatibility_date": "2026-07-01",
@@ -7,3 +5,4 @@ wrangler.jsonc
     "directory": "./dist"
   }
 }
+s
