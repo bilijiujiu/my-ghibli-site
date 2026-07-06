@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>風の小屋 — A Walkable Portfolio</title>
+  <style>
+    html, body {
+      margin: 0; height: 100%; background: #1e1e22;
+      display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      overflow: hidden;
+    }
+    #game { max-width: 100vw; max-height: 100vh; }
+    .touch-btn {
+      position: fixed; z-index: 10; width: 52px; height: 52px; border-radius: 50%;
+      background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.32);
+      color: #fff; font-size: 19px; font-weight: 700;
+      display: none; align-items: center; justify-content: center;
+      user-select: none; -webkit-user-select: none; touch-action: none;
+    }
+    @media (pointer: coarse) { .touch-btn { display: flex; } }
+    #btnU { left: 78px;  bottom: 130px; }
+    #btnD { left: 78px;  bottom: 18px;  }
+    #btnL { left: 18px;  bottom: 74px;  }
+    #btnR { left: 138px; bottom: 74px;  }
+    #btnE { right: 24px; bottom: 60px; background: rgba(214,150,60,.35); border-color: rgba(255,210,140,.6); }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+  <div class="touch-btn" id="btnU">▲</div>
+  <div class="touch-btn" id="btnD">▼</div>
+  <div class="touch-btn" id="btnL">◀</div>
+  <div class="touch-btn" id="btnR">▶</div>
+  <div class="touch-btn" id="btnE">E</div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
