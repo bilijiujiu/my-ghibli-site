@@ -4,7 +4,8 @@ import { W, H, u, SCALE } from '../config/constants';
 /**
  * 第一幕:远景标题 + 会走的蒸汽小屋。
  * 背景 = hero.webp 叠层:base 底图 / grass 草地(风效)/ front 前景高草。
- * 云:待重构为单朵 PNG 漂移(见 design.md),当前底图云静止显示。
+ * 云:cloud1.png 单张云带缓慢横移。
+ * 小屋:落地阴影 + 踩进草层 + 黄昏压暗融合。
  */
 
 /* ===== 想调效果,改这里 ===== */
@@ -17,11 +18,13 @@ const PARALLAX = { base: 5 * SCALE, grass: 15 * SCALE, front: 22 * SCALE };
 export class TitleScene extends Phaser.Scene {
   private castle!: Phaser.GameObjects.Container;
   private castleBody!: Phaser.GameObjects.Container;
+  private castleShadow!: Phaser.GameObjects.Ellipse;
   private legs: Array<Phaser.GameObjects.Rectangle & { phase?: number }> = [];
   private castleDir = 1;
   private entering = false;
 
   private layers: Partial<Record<'base' | 'grass' | 'front', Phaser.GameObjects.Image>> = {};
+  private clouds: Array<{ img: Phaser.GameObjects.Image; speed: number; baseY: number }> = [];
   private grassFX?: Phaser.FX.Displacement;
   private frontFX?: Phaser.FX.Displacement;
   private lookX = 0;
@@ -31,13 +34,14 @@ export class TitleScene extends Phaser.Scene {
 
   preload(): void {
     this.load.image('s1', '/hero.webp');
-    // TODO 云重构:this.load.image('cloud1', '/cloud1.png'); ...
+    this.load.image('cloud1', '/cloud1.png');
   }
 
   create(): void {
     this.entering = false;
     this.castleDir = 1;
     this.legs = [];
+    this.clouds = [];
 
     this.makeNoiseTexture();
     this.paintScene();
@@ -96,11 +100,26 @@ export class TitleScene extends Phaser.Scene {
     this.layers.front = makeLayer(4);
     this.layers.front.setCrop(0, texH * FRONT_CROP, texW, texH * (1 - FRONT_CROP));
     this.frontFX = this.layers.front.preFX?.addDisplacement('windNoise', 0, 0) ?? undefined;
+
+    /* 云:单张云带缓慢横移,出界回卷 */
+    const cloudDefs = [
+      { key: 'cloud1', x: 0.5, y: 0.22, speed: 6 },   // x 起始水平 / y 越小越高 / speed 越大越快
+    ];
+    this.clouds = cloudDefs.map(d => ({
+      img: this.add.image(W * d.x, H * d.y, d.key).setScale(scale).setDepth(1),
+      speed: d.speed * SCALE,
+      baseY: H * d.y,
+    }));
   }
 
   private buildCastle(): void {
-    const castle = this.add.container(u(420), u(430)).setDepth(3).setScale(SCALE);
+    /* 小屋:下移到 455 踩进草层,缩到 0.82 倍(远景更小) */
+    const castle = this.add.container(u(420), u(455)).setDepth(3).setScale(SCALE * 0.82);
     this.castle = castle;
+
+    /* 落地阴影:独立对象(不进容器,否则会跟着腿晃),depth 2.5 在草地之上、小屋之下 */
+    this.castleShadow = this.add.ellipse(u(420), u(455), u(90), u(20), 0x000000, 0.28)
+      .setDepth(2.5);
 
     for (let i = 0; i < 4; i++) {
       const leg = this.add.rectangle(-42 + i * 28, -18, 10, 46, 0x4a3a2c).setOrigin(0.5, 0) as any;
@@ -120,6 +139,10 @@ export class TitleScene extends Phaser.Scene {
     ]);
     this.castleBody = body;
     castle.add(body);
+
+    /* 黄昏逆光:整体轻微压暗偏冷,融入背景光线 */
+    castle.setAlpha(0.92);
+    body.list.forEach((obj: any) => obj.setTint && obj.setTint(0xd8d0e0));
 
     this.time.addEvent({
       delay: 420, loop: true, callback: () => {
@@ -167,6 +190,14 @@ export class TitleScene extends Phaser.Scene {
       this.frontFX.y = Math.cos(t * 0.9) * GRASS_WIND * 0.6;
     }
 
+    /* 云漂移 */
+    for (const c of this.clouds) {
+      c.img.x += c.speed * dt;
+      const half = c.img.displayWidth / 2;
+      if (c.img.x - half > W + u(40)) c.img.x = -half - u(40);
+      c.img.y = c.baseY + Math.sin(t * 0.3) * u(4);
+    }
+
     /* 视差:鼠标位置 → 各层不同幅度偏移 */
     if (!this.entering) {
       const p = this.input.activePointer;
@@ -188,7 +219,13 @@ export class TitleScene extends Phaser.Scene {
       this.castle.x += u(14) * this.castleDir * dt;
       if (this.castle.x > u(860)) this.castleDir = -1;
       if (this.castle.x < u(320)) this.castleDir = 1;
-      this.castle.scaleX = this.castleDir * SCALE;
+      this.castle.scaleX = this.castleDir * SCALE * 0.82;
     }
+
+    /* 阴影跟随小屋 x,随踏步轻微呼吸(脚落地时阴影变大) */
+    this.castleShadow.x = this.castle.x;
+    const step = Math.abs(Math.sin(t * 5));
+    this.castleShadow.setScale(1 + step * 0.12, 1);
+    this.castleShadow.setAlpha(0.22 + step * 0.1);
   }
 }
