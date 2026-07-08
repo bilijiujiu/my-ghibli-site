@@ -2,10 +2,10 @@ import Phaser from 'phaser';
 import { W, H, u, SCALE } from '../config/constants';
 
 /**
- * 第一幕:远景标题 + 会走的蒸汽小屋。
+ * 第一幕:远景标题 + 会走的蒸汽小屋(真图)。
  * 背景 = hero.webp 叠层:base 底图 / grass 草地(风效)/ front 前景高草。
  * 云:cloud1.png 单张云带缓慢横移。
- * 小屋:落地阴影 + 踩进草层 + 黄昏压暗融合。
+ * 小屋:house.png 真图,暖橘染色融合黄昏 + 轻微柔化,整体颠簸+摇摆+烟囱冒烟。
  */
 
 /* ===== 想调效果,改这里 ===== */
@@ -14,12 +14,13 @@ const GRASS_CROP = 0.53;      // 草地 = 画面 53% 以下
 const FRONT_CROP = 0.90;      // 前景高草 = 最底部 10%
 const GRASS_WIND = 0.011;
 const PARALLAX = { base: 5 * SCALE, grass: 15 * SCALE, front: 22 * SCALE };
+const CASTLE_Y = 470;         // 小屋脚的 y:调这个让脚踩进草
+const CASTLE_H_RATIO = 0.42;  // 小屋高度占画面比例
+const CASTLE_TINT = 0xffd9b0; // 暖橘染色(模拟夕阳);往 0xffffff 调则更亮
 
 export class TitleScene extends Phaser.Scene {
   private castle!: Phaser.GameObjects.Container;
-  private castleBody!: Phaser.GameObjects.Container;
   private castleShadow!: Phaser.GameObjects.Ellipse;
-  private legs: Array<Phaser.GameObjects.Rectangle & { phase?: number }> = [];
   private castleDir = 1;
   private entering = false;
 
@@ -35,12 +36,12 @@ export class TitleScene extends Phaser.Scene {
   preload(): void {
     this.load.image('s1', '/hero.webp');
     this.load.image('cloud1', '/cloud1.png');
+    this.load.image('cottage', '/house.png');
   }
 
   create(): void {
     this.entering = false;
     this.castleDir = 1;
-    this.legs = [];
     this.clouds = [];
 
     this.makeNoiseTexture();
@@ -103,7 +104,7 @@ export class TitleScene extends Phaser.Scene {
 
     /* 云:单张云带缓慢横移,出界回卷 */
     const cloudDefs = [
-      { key: 'cloud1', x: 0.5, y: 0.22, speed: 6 },   // x 起始水平 / y 越小越高 / speed 越大越快
+      { key: 'cloud1', x: 0.5, y: 0.22, speed: 6 },
     ];
     this.clouds = cloudDefs.map(d => ({
       img: this.add.image(W * d.x, H * d.y, d.key).setScale(scale).setDepth(1),
@@ -113,47 +114,32 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private buildCastle(): void {
-    /* 小屋:下移到 455 踩进草层,缩到 0.82 倍(远景更小) */
-    const castle = this.add.container(u(420), u(455)).setDepth(3).setScale(SCALE * 0.82);
+    const castle = this.add.container(u(420), u(CASTLE_Y)).setDepth(3);
     this.castle = castle;
 
-    /* 落地阴影:独立对象(不进容器,否则会跟着腿晃),depth 2.5 在草地之上、小屋之下 */
-    this.castleShadow = this.add.ellipse(u(420), u(455), u(90), u(20), 0x000000, 0.28)
+    /* 落地阴影:独立对象,depth 2.5,在草地之上、小屋之下 */
+    this.castleShadow = this.add.ellipse(u(420), u(CASTLE_Y), u(120), u(24), 0x000000, 0.30)
       .setDepth(2.5);
 
-    for (let i = 0; i < 4; i++) {
-      const leg = this.add.rectangle(-42 + i * 28, -18, 10, 46, 0x4a3a2c).setOrigin(0.5, 0) as any;
-      leg.phase = (i % 2) * Math.PI;
-      this.legs.push(leg);
-      castle.add(leg);
-    }
+    /* 小屋图片:origin 底部中心,y 即"脚"的位置 */
+    const img = this.add.image(0, 0, 'cottage').setOrigin(0.5, 1);
+    const targetH = H * CASTLE_H_RATIO;
+    img.setScale(targetH / img.height);
+    img.setTint(CASTLE_TINT).setAlpha(0.96);   // 暖橘染色:融进夕阳
+    img.preFX?.addBlur(0, 1, 1, 0.8);          // 极轻微柔化:远景不那么锐利
+    castle.add(img);
 
-    const body = this.add.container(0, -20);
-    body.add([
-      this.add.rectangle(0, -60, 130, 96, 0x8a6a4a).setStrokeStyle(3, 0x5a4230),
-      this.add.triangle(0, -108, 0, 0, 84, 46, -84, 46, 0x6a4a3a).setOrigin(0.5, 1),
-      this.add.rectangle(34, -134, 18, 34, 0x5a4a42),
-      this.add.rectangle(-24, -58, 30, 30, 0xffd88a).setStrokeStyle(3, 0x5a4230),
-      this.add.rectangle(26, -40, 26, 56, 0x4a3628).setStrokeStyle(2, 0x33251a),
-      this.add.circle(60, -30, 16, 0x6a5a4a).setStrokeStyle(3, 0x4a3a2c),
-    ]);
-    this.castleBody = body;
-    castle.add(body);
-
-    /* 黄昏逆光:整体轻微压暗偏冷,融入背景光线 */
-    castle.setAlpha(0.92);
-    body.list.forEach((obj: any) => obj.setTint && obj.setTint(0xd8d0e0));
-
+    /* 烟囱冒烟(烟囱在小屋左上,位置可调) */
     this.time.addEvent({
-      delay: 420, loop: true, callback: () => {
+      delay: 520, loop: true, callback: () => {
         const puff = this.add.circle(
-          this.castle.x + u(34) * this.castleDir,
-          this.castle.y - u(172),
-          u(7), 0xf0f0ea, 0.7,
+          this.castle.x - u(60) * this.castleDir,
+          this.castle.y - u(210),
+          u(6), 0xf0f0ea, 0.5,
         ).setDepth(3);
         this.tweens.add({
-          targets: puff, y: puff.y - u(70), x: puff.x + Phaser.Math.Between(-u(16), u(16)),
-          scale: 2.1, alpha: 0, duration: 2100, onComplete: () => puff.destroy(),
+          targets: puff, y: puff.y - u(80), x: puff.x + Phaser.Math.Between(-u(14), u(14)),
+          scale: 2.4, alpha: 0, duration: 2400, onComplete: () => puff.destroy(),
         });
       },
     });
@@ -212,20 +198,21 @@ export class TitleScene extends Phaser.Scene {
     if (this.layers.grass) this.layers.grass.setPosition(W / 2 + px('grass'), H / 2 + py('grass'));
     if (this.layers.front) this.layers.front.setPosition(W / 2 + px('front'), H / 2 + py('front'));
 
-    /* 小屋踱步 */
-    for (const leg of this.legs) leg.rotation = Math.sin(t * 5 + (leg.phase || 0)) * 0.4;
-    this.castleBody.y = -20 + Math.sin(t * 5) * 3;
+    /* 小屋:整体沉重颠簸 + 轻微摇摆(替代迈腿) */
+    const bob = Math.abs(Math.sin(t * 2.2)) * u(6);
+    this.castle.y = u(CASTLE_Y) - bob;
+    this.castle.angle = Math.sin(t * 2.2) * 1.2;
     if (!this.entering) {
       this.castle.x += u(14) * this.castleDir * dt;
-      if (this.castle.x > u(860)) this.castleDir = -1;
-      if (this.castle.x < u(320)) this.castleDir = 1;
-      this.castle.scaleX = this.castleDir * SCALE * 0.82;
+      if (this.castle.x > u(880)) this.castleDir = -1;
+      if (this.castle.x < u(300)) this.castleDir = 1;
     }
+    this.castle.scaleX = this.castleDir;
 
-    /* 阴影跟随小屋 x,随踏步轻微呼吸(脚落地时阴影变大) */
+    /* 阴影跟随 + 颠簸呼吸 */
     this.castleShadow.x = this.castle.x;
-    const step = Math.abs(Math.sin(t * 5));
-    this.castleShadow.setScale(1 + step * 0.12, 1);
-    this.castleShadow.setAlpha(0.22 + step * 0.1);
+    const contact = 1 - Math.abs(Math.sin(t * 2.2));
+    this.castleShadow.setScale(1 + contact * 0.15, 1);
+    this.castleShadow.setAlpha(0.20 + contact * 0.14);
   }
 }
