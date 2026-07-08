@@ -68,7 +68,7 @@ export class RoomScene extends Phaser.Scene {
 
     this.input.keyboard!.on('keydown-BACKTICK', () => this.toggleDebug());
 
-    this.cameras.main.fadeIn(650, 10, 8, 6);
+    this.cameras.main.fadeIn(900, 255, 224, 176);
   }
 
   private paintPlaceholder(): void {

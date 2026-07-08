@@ -114,21 +114,47 @@ export class DressingScene extends Phaser.Scene {
     });
   }
 
-  private enter(): void {
-    if (this.entering) return;
-    this.entering = true;
+private enter(): void {
+  if (this.entering) return;
+  this.entering = true;
 
-    this.tweens.add({ targets: [this.welcome, this.hint], alpha: 0, duration: 300 });
+  /* 文字先淡出 */
+  this.tweens.add({ targets: [this.welcome, this.hint], alpha: 0, duration: 300 });
 
-    this.walkTo(u(DOOR_X), 1200, () => {
-      if (this.doorGlow) this.tweens.add({ targets: this.doorGlow, alpha: 0.7, duration: 400 });
-      this.time.delayedCall(400, () => {
-        this.cameras.main.fadeOut(600, 10, 8, 6);
-        this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Room'));
-      });
+  /* 主角走到门前 */
+  this.walkTo(u(DOOR_X - 90), 1400, () => {
+    /* 1. 主角走进门:缩小 + 淡出(模拟走入门内的透视) */
+    this.tweens.add({
+      targets: this.hero.c,
+      scaleX: SCALE * HERO_SCALE * 0.7,
+      scaleY: SCALE * HERO_SCALE * 0.7,
+      x: u(DOOR_X),
+      y: u(HERO_Y - 30),
+      alpha: 0,
+      duration: 900,
+      ease: 'Sine.easeIn',
     });
-  }
 
+    /* 2. 相机推向门 */
+    const cam = this.cameras.main;
+    cam.pan(u(DOOR_X), u(DOOR_Y), 1600, 'Sine.easeInOut');
+    cam.zoomTo(2.6, 1600, 'Sine.easeInOut');
+
+    /* 3. 门内暖光渐渐充满画面 */
+    if (this.doorGlow) {
+      this.tweens.add({ targets: this.doorGlow, alpha: 0.9, duration: 900, delay: 300 });
+    }
+    const flood = this.add.rectangle(u(DOOR_X), u(DOOR_Y), W * 2, H * 2, 0xffe0b0, 0)
+      .setDepth(90).setScrollFactor(1);
+    this.tweens.add({
+      targets: flood, alpha: 1, duration: 900, delay: 800, ease: 'Quad.easeIn',
+      onComplete: () => {
+        /* 4. 过曝顶点切场景 */
+        this.scene.start('Room');
+      },
+    });
+  });
+}
   update(): void {
     /* 走路动画由 walkTo 的 onUpdate 驱动 */
   }
