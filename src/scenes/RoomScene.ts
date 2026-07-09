@@ -1,9 +1,8 @@
 import Phaser from 'phaser';
-import { W, H, u, SCALE, SPEED, DEPTH_FACTOR, ROOM_BOUNDS } from '../config/constants';
-import { OUTFITS } from '../config/outfits';
-import { Hero } from '../entities/Hero';
+import { W, H, u, SCALE } from '../config/constants';
 import { Dialog } from '../systems/dialog';
 
+/** 交互点:对应 design.md 表② */
 interface Interactive {
   x: number;
   y: number;
@@ -13,91 +12,76 @@ interface Interactive {
 }
 
 /**
- * 第三幕:室内 WASD 自由移动(2.5D 纵深 + setDepth(y) 遮挡)。
- * 按 `(反引号)切换调试模式:显示交互点范围圈与坐标。
+ * 第三幕:室内第一人称探索。
+ * 没有角色 —— WASD 移动的是"你的视角",相机在房间里平移。
+ * 靠近物品时,物品旁浮现 E 提示;按 E 打开内容弹层。
+ * 按 `(反引号)开调试:显示交互点范围与坐标。
  */
+
+/* ===== 房间参数 ===== */
+const ROOM_W = 2200;        // 房间逻辑宽度(比屏幕宽,可以左右走)
+const ROOM_H = 700;         // 房间逻辑高度
+const MOVE_SPEED = 300;     // 移动速度(逻辑 px/s)
+const START_X = 200;        // 出生点(进门处)
+const START_Y = 500;
+/* 可行走范围(你的"脚"能到的区域) */
+const BOUNDS = { minX: 120, maxX: ROOM_W - 120, minY: 430, maxY: 620 };
+
 export class RoomScene extends Phaser.Scene {
-  private hero!: Hero;
+  private pos = { x: START_X, y: START_Y };   // "你"在房间里的位置(逻辑坐标)
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private dialog!: Dialog;
-  private prompt!: Phaser.GameObjects.Container;
-  private promptLabel!: Phaser.GameObjects.Text;
   private interactives: Interactive[] = [];
+  private prompts: Map<Interactive, Phaser.GameObjects.Container> = new Map();
   private debugLayer: Phaser.GameObjects.Container | null = null;
 
   constructor() { super('Room'); }
 
   create(): void {
-    this.paintPlaceholder();
+    this.pos = { x: START_X, y: START_Y };
 
-    const outfitIdx = (this.registry.get('outfitIndex') as number) || 0;
-    this.hero = new Hero(this, u(120), u(470), outfitIdx);
-    this.hero.c.setScale(SCALE);
+    this.paintPlaceholder();
 
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,E') as any;
     this.dialog = new Dialog(this);
 
-    this.prompt = this.add.container(0, 0).setDepth(900).setVisible(false);
-    this.prompt.add([
-      this.add.circle(0, 0, u(14), 0xffffff, 0.95),
-      this.add.text(0, 0, 'E', { fontSize: `${15 * SCALE}px`, fontStyle: 'bold', color: '#333' }).setOrigin(0.5),
-    ]);
-    this.promptLabel = this.add.text(0, 0, '', {
-      fontFamily: '"Nunito", sans-serif',
-      fontSize: `${13 * SCALE}px`, color: '#fff', backgroundColor: 'rgba(0,0,0,.55)', padding: { x: 8, y: 3 },
-    }).setOrigin(0.5, 0).setDepth(900).setVisible(false);
+    this.buildInteractives();
+    this.buildHUD();
 
-    const o = OUTFITS[outfitIdx];
-    this.interactives = [
-      { x: u(180), y: u(420), range: u(100), label: 'Warm up',
-        action: () => this.dialog.open('Fireplace', 'Placeholder — design.md table ② I2 content goes here.') },
-      { x: u(560), y: u(420), range: u(100), label: 'Browse the shelf',
-        action: () => this.dialog.open('Bookshelf · Works', 'Table ② I1: project cards. You are wearing "' + o.name + '" — passed across scenes via registry.') },
-      { x: u(820), y: u(500), range: u(110), label: 'The table',
-        action: () => this.dialog.open('Table', 'Walk around it to see the setDepth(y) occlusion.') },
-    ];
-
-    this.add.text(u(24), u(18), '👗 ' + o.name, {
-      fontFamily: '"Nunito", sans-serif',
-      fontSize: `${16 * SCALE}px`, fontStyle: 'bold', color: '#fff',
-    }).setDepth(999);
-    this.add.text(W / 2, H - u(16), 'WASD / Arrows to move · Press E to interact · ` for debug', {
-      fontFamily: '"Nunito", sans-serif',
-      fontSize: `${13 * SCALE}px`, color: 'rgba(255,255,255,.8)',
-    }).setOrigin(0.5, 1).setDepth(999);
+    /* 相机:跟随"你"的位置,限制在房间边界内 */
+    const cam = this.cameras.main;
+    cam.setBounds(0, 0, u(ROOM_W), u(ROOM_H));
+    cam.centerOn(u(this.pos.x), u(this.pos.y) - u(60));
+    cam.fadeIn(900, 255, 224, 176);   // 从暖光淡入,接住第二幕的过曝
 
     this.input.keyboard!.on('keydown-BACKTICK', () => this.toggleDebug());
-
-    this.cameras.main.fadeIn(900, 255, 224, 176);
   }
 
+  /** 占位房间:等真图来了替换这个方法 */
   private paintPlaceholder(): void {
     const wall = this.add.graphics();
     wall.fillGradientStyle(0xc8a878, 0xc8a878, 0xa8875c, 0xa8875c, 1);
-    wall.fillRect(0, 0, W, u(380));
+    wall.fillRect(0, 0, u(ROOM_W), u(430));
     const floor = this.add.graphics();
     floor.fillGradientStyle(0x8a6a48, 0x8a6a48, 0x5d4430, 0x5d4430, 1);
-    floor.fillRect(0, u(380), W, H - u(380));
+    floor.fillRect(0, u(430), u(ROOM_W), u(ROOM_H) - u(430));
     for (let i = 0; i < 6; i++) {
-      this.add.rectangle(0, u(415) + i * u(38), W * 2, 2, 0x4a3520, 0.35);
+      this.add.rectangle(0, u(460) + i * u(40), u(ROOM_W) * 2, 2, 0x4a3520, 0.3);
     }
-    this.add.rectangle(W / 2, u(24), W, u(48), 0x5d4430);
+    this.add.rectangle(u(ROOM_W) / 2, u(24), u(ROOM_W), u(48), 0x5d4430);
 
-    this.add.rectangle(u(1060), u(210), u(130), u(160), 0xa8c4e0).setStrokeStyle(6, 0x5a4230);
-    this.add.rectangle(u(1060), u(210), u(4), u(160), 0x5a4230);
-    this.add.rectangle(u(1060), u(210), u(130), u(4), 0x5a4230);
-    this.add.triangle(u(1010), u(460), 0, -u(250), u(130), u(80), -u(80), u(80), 0xfff0d0, 0.12);
-
-    const fp = this.add.container(u(180), u(380)).setDepth(u(380)).setScale(SCALE);
+    /* 壁炉 */
+    const fp = this.add.container(u(320), u(430)).setScale(SCALE);
     fp.add([
       this.add.rectangle(0, -110, 130, 220, 0x6a6a72),
       this.add.rectangle(0, -60, 90, 110, 0x1a1a1e),
       this.add.triangle(0, -14, 0, -52, 26, 0, -26, 0, 0xffb347),
     ]);
-    const glow = this.add.circle(u(180), u(330), u(100), 0xff9a3c, 0.14).setDepth(u(379));
+    const glow = this.add.circle(u(320), u(380), u(110), 0xff9a3c, 0.14);
     this.tweens.add({ targets: glow, alpha: 0.24, duration: 800, yoyo: true, repeat: -1 });
 
-    const shelf = this.add.container(u(560), u(380)).setDepth(u(380)).setScale(SCALE);
+    /* 书架 */
+    const shelf = this.add.container(u(760), u(430)).setScale(SCALE);
     shelf.add([this.add.rectangle(0, -130, 170, 260, 0x4a3423).setStrokeStyle(4, 0x33241a)]);
     const cols = [0x8a4a3a, 0x3a6a5a, 0x9a7a3a, 0x4a5a8a];
     for (let r = 0; r < 3; r++) {
@@ -106,7 +90,8 @@ export class RoomScene extends Phaser.Scene {
       }
     }
 
-    const table = this.add.container(u(820), u(480)).setDepth(u(480)).setScale(SCALE);
+    /* 桌子 */
+    const table = this.add.container(u(1200), u(500)).setScale(SCALE);
     table.add([
       this.add.rectangle(-56, -34, 12, 40, 0x5a4230).setOrigin(0.5, 0),
       this.add.rectangle(56, -34, 12, 40, 0x5a4230).setOrigin(0.5, 0),
@@ -114,35 +99,87 @@ export class RoomScene extends Phaser.Scene {
       this.add.circle(-20, -52, 9, 0xd06a4a),
       this.add.rectangle(28, -54, 26, 14, 0xe8dcc0),
     ]);
+
+    /* 窗 + 光柱 */
+    this.add.rectangle(u(1650), u(230), u(140), u(170), 0xa8c4e0).setStrokeStyle(6, 0x5a4230);
+    this.add.rectangle(u(1650), u(230), u(4), u(170), 0x5a4230);
+    this.add.rectangle(u(1650), u(230), u(140), u(4), 0x5a4230);
+    this.add.triangle(u(1600), u(500), 0, -u(270), u(140), u(90), -u(90), u(90), 0xfff0d0, 0.12);
+
+    /* 上锁的门(毕设,design.md I5) */
+    this.add.rectangle(u(1950), u(360), u(110), u(240), 0x4a3628).setStrokeStyle(5, 0x33251a);
+    this.add.text(u(1950), u(360), '🔒', { fontSize: `${34 * SCALE}px` }).setOrigin(0.5);
+  }
+
+  /** 交互点 + 每个点旁边的 E 提示气泡(初始隐藏) */
+  private buildInteractives(): void {
+    this.interactives = [
+      { x: 320, y: 470, range: 150, label: 'Warm up by the fire',
+        action: () => this.dialog.open('Fireplace', 'design.md 表② I2 —— 关于我的内容放这里。') },
+      { x: 760, y: 470, range: 150, label: 'Browse the shelf',
+        action: () => this.dialog.open('Bookshelf · Works', 'design.md 表② I1 —— SuperAuto、这个网站本身,作品卡片放这里。') },
+      { x: 1200, y: 540, range: 150, label: 'Look at the desk',
+        action: () => this.dialog.open('The Desk', 'design.md 表② I3/I4 —— 简历下载、联系方式放这里。') },
+      { x: 1650, y: 500, range: 150, label: 'Look outside',
+        action: () => this.dialog.open('The Window', 'design.md 表② I5 彩蛋 —— 一句关于窗外的闲话。') },
+      { x: 1950, y: 480, range: 150, label: 'A locked door',
+        action: () => this.dialog.open('🔒 Locked', '毕业设计正在酝酿中,这扇门暂时打不开 —— 过阵子回来看看?') },
+    ];
+
+    /* 每个交互点上方一个 E 气泡,靠近时淡入 */
+    for (const it of this.interactives) {
+      const c = this.add.container(u(it.x), u(it.y) - u(160)).setDepth(900).setAlpha(0);
+      const bubble = this.add.circle(0, 0, u(16), 0xffffff, 0.95);
+      const e = this.add.text(0, 0, 'E', {
+        fontFamily: '"Nunito", sans-serif',
+        fontSize: `${16 * SCALE}px`, fontStyle: 'bold', color: '#333',
+      }).setOrigin(0.5);
+      const label = this.add.text(0, u(28), it.label, {
+        fontFamily: '"Nunito", sans-serif',
+        fontSize: `${13 * SCALE}px`, color: '#fff',
+        backgroundColor: 'rgba(0,0,0,.55)', padding: { x: 8, y: 3 },
+      }).setOrigin(0.5, 0);
+      c.add([bubble, e, label]);
+      this.prompts.set(it, c);
+    }
+  }
+
+  private buildHUD(): void {
+    /* HUD 固定在屏幕上,不随相机移动 */
+    this.add.text(W / 2, H - u(24), 'WASD / Arrows to move · Press E to interact', {
+      fontFamily: '"Nunito", sans-serif',
+      fontSize: `${14 * SCALE}px`, color: 'rgba(255,255,255,.85)',
+      shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,.6)', blur: 6, fill: true },
+    }).setOrigin(0.5, 1).setDepth(999).setScrollFactor(0);
   }
 
   private toggleDebug(): void {
     if (this.debugLayer) {
       this.debugLayer.destroy();
       this.debugLayer = null;
+      this.input.off('pointerdown', this.logPointer, this);
       return;
     }
     const g = this.add.container(0, 0).setDepth(950);
     for (const it of this.interactives) {
-      g.add(this.add.circle(it.x, it.y, it.range, 0xd60000, 0.12).setStrokeStyle(2, 0xd60000, 0.8));
-      g.add(this.add.text(it.x, it.y, `${it.label}\n(${Math.round(it.x)}, ${Math.round(it.y)})`, {
-        fontSize: `${12 * SCALE}px`, color: '#fff', backgroundColor: 'rgba(0,0,0,.6)', padding: { x: 6, y: 3 }, align: 'center',
+      g.add(this.add.circle(u(it.x), u(it.y), u(it.range), 0xd60000, 0.12).setStrokeStyle(2, 0xd60000, 0.8));
+      g.add(this.add.text(u(it.x), u(it.y), `${it.label}\n(${it.x}, ${it.y})`, {
+        fontSize: `${12 * SCALE}px`, color: '#fff', backgroundColor: 'rgba(0,0,0,.6)',
+        padding: { x: 6, y: 3 }, align: 'center',
       }).setOrigin(0.5));
     }
-    const b = ROOM_BOUNDS;
     g.add(this.add.rectangle(
-      (b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2,
-      b.maxX - b.minX, b.maxY - b.minY, 0x00ff88, 0.06,
+      u((BOUNDS.minX + BOUNDS.maxX) / 2), u((BOUNDS.minY + BOUNDS.maxY) / 2),
+      u(BOUNDS.maxX - BOUNDS.minX), u(BOUNDS.maxY - BOUNDS.minY), 0x00ff88, 0.06,
     ).setStrokeStyle(2, 0x00ff88, 0.7));
-    g.add(this.add.text(u(24), u(50), 'Debug: click anywhere to log coordinates', {
-      fontSize: `${12 * SCALE}px`, color: '#0f8', backgroundColor: 'rgba(0,0,0,.6)', padding: { x: 6, y: 3 },
-    }));
     this.input.on('pointerdown', this.logPointer, this);
     this.debugLayer = g;
   }
 
   private logPointer(p: Phaser.Input.Pointer): void {
-    if (this.debugLayer) console.log(`interactive coord: x=${Math.round(p.worldX)}, y=${Math.round(p.worldY)}`);
+    if (this.debugLayer) {
+      console.log(`coord: x=${Math.round(p.worldX / SCALE)}, y=${Math.round(p.worldY / SCALE)}`);
+    }
   }
 
   update(_time: number, delta: number): void {
@@ -150,34 +187,46 @@ export class RoomScene extends Phaser.Scene {
     const k = this.keys;
     const touch = (window as any).__touch || {};
 
+    /* 弹层打开时冻结移动 */
     if (this.dialog.isOpen) {
       if (Phaser.Input.Keyboard.JustDown(k.E) || touch.e) { touch.e = false; this.dialog.close(); }
-      this.hero.update(dt, 0, 0, 0);
       return;
     }
 
+    /* 移动"你"的位置 */
     let dx = 0, dy = 0;
     if (k.A.isDown || k.LEFT.isDown || touch.left) dx = -1;
     if (k.D.isDown || k.RIGHT.isDown || touch.right) dx = 1;
     if (k.W.isDown || k.UP.isDown || touch.up) dy = -1;
     if (k.S.isDown || k.DOWN.isDown || touch.down) dy = 1;
 
-    this.hero.update(dt, dx, dy, SPEED, DEPTH_FACTOR);
-    this.hero.x = Phaser.Math.Clamp(this.hero.x, ROOM_BOUNDS.minX, ROOM_BOUNDS.maxX);
-    this.hero.y = Phaser.Math.Clamp(this.hero.y, ROOM_BOUNDS.minY, ROOM_BOUNDS.maxY);
-    this.hero.c.setDepth(this.hero.y);
+    this.pos.x = Phaser.Math.Clamp(this.pos.x + MOVE_SPEED * dx * dt, BOUNDS.minX, BOUNDS.maxX);
+    this.pos.y = Phaser.Math.Clamp(this.pos.y + MOVE_SPEED * 0.55 * dy * dt, BOUNDS.minY, BOUNDS.maxY);
 
+    /* 相机跟随视角(稍微抬高,像人的视线) */
+    const cam = this.cameras.main;
+    const targetX = u(this.pos.x);
+    const targetY = u(this.pos.y) - u(60);
+    cam.scrollX += (targetX - W / 2 - cam.scrollX) * 0.08;
+    cam.scrollY += (targetY - H / 2 - cam.scrollY) * 0.08;
+
+    /* 交互检测:找最近的可交互点 */
     let near: Interactive | null = null;
+    let minDist = Infinity;
     for (const it of this.interactives) {
-      if (Phaser.Math.Distance.Between(this.hero.x, this.hero.y, it.x, it.y) < it.range) { near = it; break; }
+      const d = Phaser.Math.Distance.Between(this.pos.x, this.pos.y, it.x, it.y);
+      if (d < it.range && d < minDist) { near = it; minDist = d; }
     }
-    if (near) {
-      this.prompt.setVisible(true).setPosition(this.hero.c.x, this.hero.c.y - u(150));
-      this.promptLabel.setVisible(true).setText(near.label).setPosition(this.hero.c.x, this.hero.c.y - u(128));
-      if (Phaser.Input.Keyboard.JustDown(k.E) || touch.e) { touch.e = false; near.action(); }
-    } else {
-      this.prompt.setVisible(false);
-      this.promptLabel.setVisible(false);
+
+    /* 气泡:靠近的那个淡入,其余淡出 */
+    for (const [it, c] of this.prompts) {
+      const target = it === near ? 1 : 0;
+      c.alpha += (target - c.alpha) * 0.15;
+    }
+
+    if (near && (Phaser.Input.Keyboard.JustDown(k.E) || touch.e)) {
+      touch.e = false;
+      near.action();
     }
   }
 }
