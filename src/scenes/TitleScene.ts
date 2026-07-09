@@ -9,14 +9,13 @@ import { W, H, u, SCALE } from '../config/constants';
 
 /* ===== 想调效果,改这里 ===== */
 const MARGIN = 44 * SCALE;
-const GRASS_CROP = 0.50;      // 草地 = 画面这个比例以下
-const FRONT_CROP = 0.88;      // 前景高草 = 最底部部分(风吹最强)
+const GRASS_CROP = 0.50;
+const FRONT_CROP = 0.88;
 const GRASS_WIND = 0.011;
 const PARALLAX = { base: 5 * SCALE, grass: 14 * SCALE, front: 20 * SCALE };
 
 export class TitleScene extends Phaser.Scene {
   private entering = false;
-
   private layers: Partial<Record<'base' | 'grass' | 'front', Phaser.GameObjects.Image>> = {};
   private clouds: Array<{ img: Phaser.GameObjects.Image; speed: number; baseY: number }> = [];
   private grassFX?: Phaser.FX.Displacement;
@@ -44,13 +43,12 @@ export class TitleScene extends Phaser.Scene {
     this.input.once('pointerdown', () => {
       this.entering = true;
       const cam = this.cameras.main;
-      cam.zoomTo(1.6, 1200, 'Sine.easeIn');   // 轻微推近,过渡到第二幕
+      cam.zoomTo(1.6, 1200, 'Sine.easeIn');
       cam.fadeOut(1150, 250, 246, 238);
       cam.once('camerafadeoutcomplete', () => this.scene.start('Dressing'));
     });
   }
 
-  /** 运行时生成平滑噪声图,给位移特效当"风场" */
   private makeNoiseTexture(): void {
     if (this.textures.exists('windNoise')) return;
     const size = 128, cell = 16;
@@ -93,7 +91,7 @@ export class TitleScene extends Phaser.Scene {
 
     /* 云:透明 PNG 缓慢横移,出界回卷 */
     const cloudDefs = [
-      { key: 'cloud1', x: 0.5, y: 0.18, speed: 6 },   // x 起始水平 / y 越小越高 / speed 越大越快
+      { key: 'cloud1', x: 0.5, y: 0.18, speed: 6 },
     ];
     this.clouds = cloudDefs.map(d => ({
       img: this.add.image(W * d.x, H * d.y, d.key).setScale(scale).setDepth(1),
@@ -103,7 +101,6 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private buildTitleUI(): void {
-    /* 只保留一句低调的进入引导 */
     const enter = this.add.text(W / 2, H - u(70), '— Click to Start —', {
       fontFamily: '"Nunito", sans-serif',
       fontSize: `${20 * SCALE}px`, color: '#fffaf0',
@@ -116,7 +113,6 @@ export class TitleScene extends Phaser.Scene {
     const dt = delta / 1000;
     const t = time / 1000;
 
-    /* 风:草地位移强度随时间起伏 */
     if (this.grassFX) {
       this.grassFX.x = Math.sin(t * 1.05) * GRASS_WIND + GRASS_WIND * 0.4;
       this.grassFX.y = Math.cos(t * 0.75) * GRASS_WIND * 0.45;
@@ -126,7 +122,6 @@ export class TitleScene extends Phaser.Scene {
       this.frontFX.y = Math.cos(t * 0.9) * GRASS_WIND * 0.6;
     }
 
-    /* 云漂移 */
     for (const c of this.clouds) {
       c.img.x += c.speed * dt;
       const half = c.img.displayWidth / 2;
@@ -134,7 +129,6 @@ export class TitleScene extends Phaser.Scene {
       c.img.y = c.baseY + Math.sin(t * 0.3) * u(4);
     }
 
-    /* 视差:鼠标位置 → 各层不同幅度偏移 */
     if (!this.entering) {
       const p = this.input.activePointer;
       const tx = Phaser.Math.Clamp(p.x / W - 0.5, -0.5, 0.5);
