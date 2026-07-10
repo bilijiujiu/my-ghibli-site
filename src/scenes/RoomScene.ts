@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { W, H, u, SCALE } from '../config/constants';
 import { Dialog } from '../systems/dialog';
+import { HeroRig } from '../entities/HeroRig';
 
 /** 交互点:对应 design.md 表② */
 interface Interactive {
@@ -12,13 +13,13 @@ interface Interactive {
 }
 
 /**
- * 第三幕:室内第一人称探索(room.webp 长卷)。
+ * 第三幕:室内探索(room.webp 长卷)。
  * 布局:门(左) → 壁炉 → 书架 → 桌子 → 窗 → 楼梯(右)
- * 坐标已按实测校准。DEBUG=false 时关闭标定辅助。
+ * 角色:剪纸骨架(HeroRig),WASD 移动,四肢摆动。
  */
 
 /* ===== 标定开关 ===== */
-const DEBUG = false;         // 需要重新标定时改成 true
+const DEBUG = false;
 
 /* ===== 房间参数 ===== */
 const ROOM_H = 620;
@@ -28,10 +29,16 @@ const START_X = 150;
 const START_Y = 520;
 const BOUNDS = { minX: 120, maxX: ROOM_W - 120, minY: 480, maxY: 570 };
 
+/* ===== 角色参数(调这里) ===== */
+const HERO_SCALE = 0.48;      // 角色整体缩放
+const HERO_Y_OFFSET = 86;    // 容器中心相对脚底的偏移 = 550(原图) × HERO_SCALE
+
 export class RoomScene extends Phaser.Scene {
   private pos = { x: START_X, y: START_Y };
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private dialog!: Dialog;
+  private rig!: HeroRig;
+  private heroShadow!: Phaser.GameObjects.Ellipse;
   private interactives: Interactive[] = [];
   private prompts: Map<Interactive, Phaser.GameObjects.Container> = new Map();
   private coordText?: Phaser.GameObjects.Text;
@@ -40,6 +47,10 @@ export class RoomScene extends Phaser.Scene {
 
   preload(): void {
     this.load.image('room', '/room.webp');
+    this.load.image('hero_head', '/hero_base_head.png');
+    this.load.image('hero_arm', '/hero_base_arm.png');
+    this.load.image('hero_leg', '/hero_base_leg.png');
+    this.load.image('hero_torso', '/hero_base_body.png');
   }
 
   create(): void {
@@ -50,6 +61,7 @@ export class RoomScene extends Phaser.Scene {
     this.dialog = new Dialog(this);
 
     this.buildInteractives();
+    this.buildHero();
     this.buildHUD();
 
     const cam = this.cameras.main;
@@ -66,7 +78,7 @@ export class RoomScene extends Phaser.Scene {
     const scale = u(ROOM_H) / src.height;
     this.add.image(0, 0, 'room').setOrigin(0, 0).setScale(scale).setDepth(0);
 
-    /* 壁炉火光呼吸(对准实测的火焰位置) */
+    /* 壁炉火光呼吸 */
     const fireGlow = this.add.circle(u(609), u(424), u(130), 0xff9a3c, 0.10).setDepth(1);
     this.tweens.add({ targets: fireGlow, alpha: 0.20, duration: 900, yoyo: true, repeat: -1 });
 
@@ -79,8 +91,17 @@ export class RoomScene extends Phaser.Scene {
     this.tweens.add({ targets: deskLamp, alpha: 0.15, duration: 1200, yoyo: true, repeat: -1 });
   }
 
+  /** 角色:落地阴影 + 剪纸骨架 */
+  private buildHero(): void {
+    this.heroShadow = this.add.ellipse(u(START_X), u(START_Y), u(56), u(13), 0x000000, 0.25)
+      .setDepth(499);
+
+    this.rig = new HeroRig(this, u(START_X), u(START_Y) - u(HERO_Y_OFFSET));
+    this.rig.c.setScale(HERO_SCALE);
+    this.rig.c.setDepth(500);
+  }
+
   private buildInteractives(): void {
-    /* x 用实测值,y 统一在地板高度(你站着的位置) */
     this.interactives = [
       { x: 609, y: 520, range: 150, label: 'Warm up by the fire',
         action: () => this.dialog.open('Fireplace', 'design.md 表② I2 —— 关于我的内容放这里。') },
@@ -94,7 +115,6 @@ export class RoomScene extends Phaser.Scene {
         action: () => this.dialog.open('Upstairs', '楼上还在整理中 —— 毕业设计正在酝酿。过阵子回来看看?') },
     ];
 
-    /* 气泡显示在家具的实际高度上方 */
     const bubbleY: Record<number, number> = {
       609: 424, 1157: 302, 1425: 394, 1720: 332, 2142: 396,
     };
@@ -125,7 +145,6 @@ export class RoomScene extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(999).setScrollFactor(0);
   }
 
-  /** 标定辅助:DEBUG=true 时显示 */
   private buildDebug(): void {
     for (const it of this.interactives) {
       this.add.circle(u(it.x), u(it.y), u(it.range), 0xd60000, 0.15)
@@ -162,6 +181,7 @@ export class RoomScene extends Phaser.Scene {
 
     if (this.dialog.isOpen) {
       if (Phaser.Input.Keyboard.JustDown(k.E) || touch.e) { touch.e = false; this.dialog.close(); }
+      this.rig.update(dt, false);
       return;
     }
 
@@ -174,10 +194,20 @@ export class RoomScene extends Phaser.Scene {
     this.pos.x = Phaser.Math.Clamp(this.pos.x + MOVE_SPEED * dx * dt, BOUNDS.minX, BOUNDS.maxX);
     this.pos.y = Phaser.Math.Clamp(this.pos.y + MOVE_SPEED * 0.5 * dy * dt, BOUNDS.minY, BOUNDS.maxY);
 
+    /* ---- 角色 ---- */
+    const moving = dx !== 0 || dy !== 0;
+    this.rig.update(dt, moving);
+    if (dx !== 0) this.rig.setDirection(dx);
+
+    this.rig.c.setPosition(u(this.pos.x), u(this.pos.y) - u(HERO_Y_OFFSET));
+    this.heroShadow.setPosition(u(this.pos.x), u(this.pos.y));
+
+    /* 相机跟随 */
     const cam = this.cameras.main;
     cam.scrollX += (u(this.pos.x) - W / 2 - cam.scrollX) * 0.08;
     cam.scrollY = 0;
 
+    /* 交互检测 */
     let near: Interactive | null = null;
     let minDist = Infinity;
     for (const it of this.interactives) {
