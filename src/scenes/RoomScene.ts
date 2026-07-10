@@ -3,6 +3,7 @@ import { W, H, u, SCALE } from '../config/constants';
 import { Dialog } from '../systems/dialog';
 import { HeroRig } from '../entities/HeroRig';
 import { BookOverlay } from '../systems/BookOverlay';
+import { RainWindow } from '../systems/RainWindow';
 
 /** 交互点:对应 design.md 表② */
 interface Interactive {
@@ -20,7 +21,7 @@ interface Interactive {
  */
 
 /* ===== 标定开关 ===== */
-const DEBUG = false;
+const DEBUG = true;
 
 /* ===== 房间参数 ===== */
 const ROOM_H = 620;
@@ -34,11 +35,15 @@ const BOUNDS = { minX: 120, maxX: ROOM_W - 120, minY: 480, maxY: 570 };
 const HERO_SCALE = 0.48;      // 角色整体缩放
 const HERO_Y_OFFSET = 86;    // 容器中心相对脚底的偏移 = 550(原图) × HERO_SCALE
 
+/* ===== 窗户区域(你量的坐标:左上1616,274 右下1792,437) ===== */
+const WIN = { x: 1616, y: 274, w: 1792 - 1616, h: 437 - 274 };
+
 export class RoomScene extends Phaser.Scene {
   private pos = { x: START_X, y: START_Y };
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private dialog!: Dialog;
   private book!: BookOverlay;
+  private rain!: RainWindow;
   private rig!: HeroRig;
   private heroShadow!: Phaser.GameObjects.Ellipse;
   private interactives: Interactive[] = [];
@@ -67,6 +72,9 @@ export class RoomScene extends Phaser.Scene {
     this.buildInteractives();
     this.buildHero();
     this.buildHUD();
+
+    /* 窗户玻璃雨滴(一直下) */
+    this.rain = new RainWindow(this, WIN);
 
     const cam = this.cameras.main;
     cam.setBounds(0, 0, u(ROOM_W), u(ROOM_H));
@@ -108,7 +116,7 @@ export class RoomScene extends Phaser.Scene {
   private buildInteractives(): void {
     this.interactives = [
       { x: 609, y: 520, range: 150, label: 'Warm up by the fire',
-        action: () => this.dialog.open('Fireplace', 'design.md 表② I2 —— 关于我的内容放这里。') },
+        action: () => this.scene.start('Fireplace') },
       { x: 1157, y: 520, range: 150, label: 'Browse the shelf',
         action: () => this.book.open() },
       { x: 1425, y: 525, range: 140, label: 'Look at the desk',
@@ -182,6 +190,9 @@ export class RoomScene extends Phaser.Scene {
     const dt = delta / 1000;
     const k = this.keys;
     const touch = (window as any).__touch || {};
+
+    /* 窗户雨滴:一直下,不受开书/开对话影响 */
+    this.rain.update(dt);
 
     /* 书打开时:E 关书,吃掉其他输入,角色待机 */
     if (this.book.isOpen) {
