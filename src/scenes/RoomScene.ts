@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { W, H, u, SCALE } from '../config/constants';
 import { Dialog } from '../systems/dialog';
 import { HeroRig } from '../entities/HeroRig';
+import { BookOverlay } from '../systems/BookOverlay';
 
 /** 交互点:对应 design.md 表② */
 interface Interactive {
@@ -37,6 +38,7 @@ export class RoomScene extends Phaser.Scene {
   private pos = { x: START_X, y: START_Y };
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private dialog!: Dialog;
+  private book!: BookOverlay;
   private rig!: HeroRig;
   private heroShadow!: Phaser.GameObjects.Ellipse;
   private interactives: Interactive[] = [];
@@ -51,6 +53,7 @@ export class RoomScene extends Phaser.Scene {
     this.load.image('hero_arm', '/hero_base_arm.png');
     this.load.image('hero_leg', '/hero_base_leg.png');
     this.load.image('hero_torso', '/hero_base_body.png');
+    this.load.image('book_open', '/book_open.png');
   }
 
   create(): void {
@@ -59,6 +62,7 @@ export class RoomScene extends Phaser.Scene {
     this.paintScene();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,E') as any;
     this.dialog = new Dialog(this);
+    this.book = new BookOverlay(this);
 
     this.buildInteractives();
     this.buildHero();
@@ -106,7 +110,7 @@ export class RoomScene extends Phaser.Scene {
       { x: 609, y: 520, range: 150, label: 'Warm up by the fire',
         action: () => this.dialog.open('Fireplace', 'design.md 表② I2 —— 关于我的内容放这里。') },
       { x: 1157, y: 520, range: 150, label: 'Browse the shelf',
-        action: () => this.dialog.open('Bookshelf · Works', 'design.md 表② I1 —— 作品卡片放这里。') },
+        action: () => this.book.open() },
       { x: 1425, y: 525, range: 140, label: 'Look at the desk',
         action: () => this.dialog.open('The Desk', 'design.md 表② I3/I4 —— 简历、联系方式放这里。') },
       { x: 1720, y: 520, range: 150, label: 'Look outside',
@@ -178,6 +182,13 @@ export class RoomScene extends Phaser.Scene {
     const dt = delta / 1000;
     const k = this.keys;
     const touch = (window as any).__touch || {};
+
+    /* 书打开时:E 关书,吃掉其他输入,角色待机 */
+    if (this.book.isOpen) {
+      if (Phaser.Input.Keyboard.JustDown(k.E) || touch.e) { touch.e = false; this.book.close(); }
+      this.rig.update(dt, false);
+      return;
+    }
 
     if (this.dialog.isOpen) {
       if (Phaser.Input.Keyboard.JustDown(k.E) || touch.e) { touch.e = false; this.dialog.close(); }
