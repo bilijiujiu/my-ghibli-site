@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { W, H, u, SCALE } from '../config/constants';
+import { PhoneOverlay } from '../systems/PhoneOverlay';
+import { RecordPlayerOverlay } from '../systems/RecordPlayerOverlay';
 
 /**
  * 桌子近景 · 独立一幕。俯视桌面,四样物件各是一个入口。
@@ -36,11 +38,17 @@ export class DeskScene extends Phaser.Scene {
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private leaving = false;
   private coordText?: Phaser.GameObjects.Text;
+  private phone!: PhoneOverlay;
+  private player!: RecordPlayerOverlay;
 
   constructor() { super('Desk'); }
 
   preload(): void {
     this.load.image('desk_bg', '/desk_bg.png');
+    this.load.image('icon_instagram', '/icon_instagram.png');
+    this.load.image('icon_gmail', '/icon_gmail.png');
+    this.load.image('icon_github', '/icon_github.png');
+    this.load.image('icon_handshake', '/icon_handshake.png');
   }
 
   create(): void {
@@ -62,6 +70,9 @@ export class DeskScene extends Phaser.Scene {
 
     this.buildHotspots();
     this.buildHUD();
+
+    this.phone = new PhoneOverlay(this);
+    this.player = new RecordPlayerOverlay(this);
 
     this.keys = this.input.keyboard!.addKeys('ESC') as any;
 
@@ -91,10 +102,12 @@ export class DeskScene extends Phaser.Scene {
     }
   }
 
-  /** 点击物件:先占位,之后接各自的覆盖层面板 */
+  /** 点击物件:手机→social,吉他→唱片机,其余先占位 */
   private openItem(key: string): void {
+    if (key === 'phone') { this.phone.open(); return; }
+    if (key === 'guitar') { this.player.open(); return; }
     console.log('点击物件:', key);
-    // TODO: 按 key 打开对应面板(音乐/照片/social/彩蛋)
+    // TODO: album/coffee 各自的面板
   }
 
   private buildHUD(): void {
@@ -121,8 +134,14 @@ export class DeskScene extends Phaser.Scene {
     });
   }
 
-  update(): void {
-    if (Phaser.Input.Keyboard.JustDown(this.keys.ESC)) this.leave();
+  update(_t: number, delta: number): void {
+    this.player.update(delta / 1000);
+
+    if (Phaser.Input.Keyboard.JustDown(this.keys.ESC)) {
+      if (this.phone.isOpen) { this.phone.close(); }
+      else if (this.player.isOpen) { this.player.close(); }
+      else { this.leave(); }
+    }
   }
 
   private leave(): void {
