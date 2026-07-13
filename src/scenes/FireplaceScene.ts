@@ -5,104 +5,111 @@ import { W, H, u, SCALE } from '../config/constants';
  * 壁炉近景 · 独立一幕。
  * 从 RoomScene 按 E 进入(scene.start('Fireplace'))。
  *
- * 体验:淡入 → 暗炉膛 → 按 E 添柴,火越烧越旺 → 火旺后文字浮现 →
- *       Esc / 点击退出 → 淡回 Room。
+ * 体验:淡入 → 暗炉膛(熄灭) → 点击打火石(第一下擦火花不着,第二下点燃)
+ *       → 火由小渐旺 → 按 E 添柴更旺 → 加满文字浮现 → Esc 离开。
  *
- * 本版:呼吸粒子火焰 + 加柴变旺 + 文字暖光浮现(占位)。
- * 火星聚字留作下一步升级。
+ * 交互分工:点击=打火 / E=加柴 / Esc=离开。
+ *
+ * 火焰位置:第一次点击时,以点击位置作为火焰底部中心(FIRE_X/FIRE_Y)。
+ * 这样你点柴堆哪里,火就从哪里升起,不用手动量坐标。
  *
  * 需要 public/fireplace_bg.png。
  */
 
-/* ===== 火焰位置(逻辑坐标,先给估值,进场后用 DEBUG 调) ===== */
-const FIRE = {
-  baseX: W / 2,        // 火焰底部中心 x(炉膛中线,先用屏幕中央)
-  baseY: H * 0.72,     // 火焰底部 y(柴堆顶面)
-  spread: 90,          // 火焰横向散布半径
-};
+/* 火焰横向散布半径(屏幕像素)。想火更宽就调大这个数。 */
+const FIRE_SPREAD = u(130);
 
-/* ===== 火势等级:每加一次柴 +1,影响粒子量和光晕 ===== */
+/* 火焰倾斜:正值往右偏,负值往左偏。匹配壁炉斜视角。想更斜就调大。 */
+const FIRE_LEAN = u(35);
+
+/* ===== 火势 ===== */
 const MAX_LOGS = 4;          // 最多加几次柴
-const BASE_INTENSITY = 0.35; // 初始火势(未加柴时的小火)
+const LIT_INTENSITY = 0.35;  // 刚点燃后渐旺到的初始小火强度
+const IGNITE_TRIES = 2;      // 需要点几下才点着(第2下着)
 
 export class FireplaceScene extends Phaser.Scene {
   private emitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private coreEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
   private emberEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
-  private glow!: Phaser.GameObjects.Graphics;
   private hint!: Phaser.GameObjects.Text;
   private story!: Phaser.GameObjects.Text;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
 
-  private intensity = BASE_INTENSITY;
+  private intensity = 0;
+  private targetIntensity = 0;
   private logs = 0;
   private glowPulse = 0;
   private leaving = false;
+
+  private lit = false;
+  private igniteTries = 0;
+
+  /* 火焰底部中心(屏幕像素),固定在炉膛柴架上。位置不对就调这两个数。 */
+  private fireX = W * 0.5;
+  private fireY = H * 0.68;
 
   constructor() { super('Fireplace'); }
 
   preload(): void {
     this.load.image('fireplace_bg', '/fireplace_bg.png');
-    /* 用一张运行时生成的小圆点当粒子贴图,省得再准备素材 */
     this.makeParticleTexture();
   }
 
   create(): void {
     this.leaving = false;
-    this.intensity = BASE_INTENSITY;
+    this.intensity = 0;
+    this.targetIntensity = 0;
     this.logs = 0;
+    this.lit = false;
+    this.igniteTries = 0;
 
-    /* 先铺一层深暖黑填满全屏,让两侧空隙成为"暗场"而非黑边 */
+    /* 暗场底 */
     this.add.rectangle(W / 2, H / 2, W, H, 0x1a0f0a).setDepth(-1);
 
-    /* 背景完整装进屏幕(不裁切) */
+    /* 背景完整装进屏幕 */
     const src = this.textures.get('fireplace_bg').getSourceImage() as HTMLImageElement;
-    const scale = Math.max(W / src.width, H / src.height);
+    const scale = Math.min(W / src.width, H / src.height);
     const bg = this.add.image(W / 2, H / 2, 'fireplace_bg').setScale(scale).setDepth(0);
 
-    /* 背景左右边缘各压一道渐隐的暗色,让图片和暗场自然融合(不是硬边) */
+    /* 边缘渐隐融合 */
     const bgLeft = bg.x - bg.displayWidth / 2;
     const bgRight = bg.x + bg.displayWidth / 2;
     const fade = this.add.graphics().setDepth(1);
-    const fw = u(80);   // 渐隐宽度
+    const fw = u(80);
     for (let i = 0; i < fw; i++) {
       const a = (1 - i / fw) * 0.9;
       fade.fillStyle(0x1a0f0a, a);
-      fade.fillRect(bgLeft + i, 0, 1, H);       // 左缘往内渐隐
-      fade.fillRect(bgRight - i - 1, 0, 1, H);  // 右缘往内渐隐
+      fade.fillRect(bgLeft + i, 0, 1, H);
+      fade.fillRect(bgRight - i - 1, 0, 1, H);
     }
 
-    /* 暗色压角,让注意力集中到炉膛 */
+    /* 压角 */
     const vignette = this.add.graphics().setDepth(1);
     vignette.fillStyle(0x0a0608, 0.45);
     vignette.fillRect(0, 0, W, H);
-    vignette.fillStyle(0x000000, 0);
 
-    /* 火光晕(在火焰后面,会随火势脉动) */
-    this.glow = this.add.graphics().setDepth(2);
-
-    /* 火焰粒子 */
+    /* 火焰粒子(进场熄灭) */
     this.buildFire();
 
-    /* UI:提示 + 故事文字 */
     this.buildUI();
 
     this.keys = this.input.keyboard!.addKeys('E,ESC') as any;
-    this.input.on('pointerdown', () => this.leave());
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.strike(p));
 
-    /* 淡入(复用你项目的暖色淡入基调) */
     this.cameras.main.fadeIn(600, 20, 12, 8);
   }
 
-  /* ---------- 运行时生成粒子贴图(一个柔边圆点) ---------- */
   private makeParticleTexture(): void {
     const size = 32;
     const c = this.textures.createCanvas('spark', size, size);
     if (!c) return;
     const ctx = c.getContext();
+    /* 硬边实心圆:中心实、边缘快速收窄(不是柔光渐变),更贴插画平涂感 */
     const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
     g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.4, 'rgba(255,240,200,0.9)');
-    g.addColorStop(1, 'rgba(255,200,120,0)');
+    g.addColorStop(0.65, 'rgba(255,255,255,1)');   // 大部分实心
+    g.addColorStop(0.85, 'rgba(255,255,255,0.6)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');       // 只有最外圈软一点点
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
     c.refresh();
@@ -110,58 +117,88 @@ export class FireplaceScene extends Phaser.Scene {
 
   /* ---------- 火焰 ---------- */
   private buildFire(): void {
-    const bx = u(FIRE.baseX);
-    const by = u(FIRE.baseY);
-
-    /* 主火焰:橙红粒子上升 + 收缩 + 变透明 */
-    this.emitter = this.add.particles(bx, by, 'spark', {
-      x: { min: -u(FIRE.spread) * 0.5, max: u(FIRE.spread) * 0.5 },
-      speedY: { min: -u(180), max: -u(90) },
-      speedX: { min: -u(20), max: u(20) },
-      scale: { start: 0.9 * SCALE, end: 0 },
+    /* 底部核心层:橙红实心(不发白),NORMAL 混合避免叠加成白 */
+    this.coreEmitter = this.add.particles(this.fireX, this.fireY, 'spark', {
+      x: { min: -FIRE_SPREAD * 0.5, max: FIRE_SPREAD * 0.5 },
+      speedY: { min: -u(80), max: -u(40) },
+      speedX: { min: -u(14) + FIRE_LEAN, max: u(14) + FIRE_LEAN },
+      scale: { start: 0.9 * SCALE, end: 0.2 * SCALE },
       alpha: { start: 0.85, end: 0 },
-      lifespan: { min: 600, max: 1100 },
-      frequency: 18,
+      lifespan: { min: 350, max: 650 },
+      frequency: 16,
       quantity: 2,
-      tint: [0xffe08a, 0xffb24d, 0xff7a2e, 0xe8531a],
-      blendMode: 'ADD',
+      tint: [0xff8a2e, 0xf26a1b, 0xe0531a],   // 橙红,不含黄白
+      blendMode: 'NORMAL',
     }).setDepth(3);
 
-    /* 火星:少量小亮点飘更高 */
-    this.emberEmitter = this.add.particles(bx, by, 'spark', {
-      x: { min: -u(FIRE.spread) * 0.3, max: u(FIRE.spread) * 0.3 },
-      speedY: { min: -u(260), max: -u(150) },
-      speedX: { min: -u(35), max: u(35) },
-      scale: { start: 0.25 * SCALE, end: 0 },
-      alpha: { start: 1, end: 0 },
-      lifespan: { min: 900, max: 1600 },
-      frequency: 60,
-      quantity: 1,
-      tint: [0xffd27a, 0xffef9f],
-      blendMode: 'ADD',
+    /* 主火苗:橙黄,往上舔,NORMAL 混合 */
+    this.emitter = this.add.particles(this.fireX, this.fireY, 'spark', {
+      x: { min: -FIRE_SPREAD * 0.45, max: FIRE_SPREAD * 0.45 },
+      speedY: { min: -u(210), max: -u(120) },
+      speedX: { min: -u(20) + FIRE_LEAN, max: u(20) + FIRE_LEAN },
+      scale: { start: 0.8 * SCALE, end: 0 },
+      alpha: { start: 0.85, end: 0 },
+      lifespan: { min: 500, max: 900 },
+      frequency: 12,
+      quantity: 2,
+      tint: [0xffc24d, 0xffa838, 0xff7a2e],   // 橙黄→橙
+      blendMode: 'NORMAL',
     }).setDepth(4);
 
-    this.applyIntensity();
+    /* 顶部亮尖:少量亮黄,点缀在火苗顶端,这层用 ADD 提亮但量很少 */
+    this.emberEmitter = this.add.particles(this.fireX, this.fireY, 'spark', {
+      x: { min: -FIRE_SPREAD * 0.35, max: FIRE_SPREAD * 0.35 },
+      speedY: { min: -u(260), max: -u(160) },
+      speedX: { min: -u(30) + FIRE_LEAN * 1.4, max: u(30) + FIRE_LEAN * 1.4 },
+      scale: { start: 0.15 * SCALE, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: { min: 800, max: 1400 },
+      frequency: 110,
+      quantity: 1,
+      tint: [0xffd27a, 0xffe89f],
+      blendMode: 'ADD',
+    }).setDepth(5);
+
+    this.coreEmitter.stop();
+    this.emitter.stop();
+    this.emberEmitter.stop();
   }
 
-  /** 根据火势更新粒子量 */
+  /** 把发射器移到当前火焰位置 */
+  private moveEmittersToFire(): void {
+    this.coreEmitter.setPosition(this.fireX, this.fireY);
+    this.emitter.setPosition(this.fireX, this.fireY);
+    this.emberEmitter.setPosition(this.fireX, this.fireY);
+  }
+
   private applyIntensity(): void {
     const i = this.intensity;
-    this.emitter.frequency = Math.max(6, 22 - i * 18);
+    if (i <= 0.02) {
+      this.coreEmitter.stop();
+      this.emitter.stop();
+      this.emberEmitter.stop();
+      return;
+    }
+    if (!this.coreEmitter.emitting) this.coreEmitter.start();
+    if (!this.emitter.emitting) this.emitter.start();
+    if (!this.emberEmitter.emitting) this.emberEmitter.start();
+    /* 火势越大:核心和主火苗越密,火星略增 */
+    this.coreEmitter.frequency = Math.max(6, 16 - i * 12);
+    this.coreEmitter.quantity = Math.round(2 + i * 3);
+    this.emitter.frequency = Math.max(6, 18 - i * 14);
     this.emitter.quantity = Math.round(1 + i * 4);
-    this.emberEmitter.frequency = Math.max(20, 80 - i * 60);
+    this.emberEmitter.frequency = Math.max(30, 110 - i * 70);
   }
 
   /* ---------- UI ---------- */
   private buildUI(): void {
-    this.hint = this.add.text(W / 2, H - u(70), '按 E 添柴 · 点击离开', {
+    this.hint = this.add.text(W / 2, H - u(70), '点击柴堆打火', {
       fontFamily: '"Nunito", sans-serif',
       fontSize: `${17 * SCALE}px`, color: 'rgba(255,240,220,.9)',
       shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,.7)', blur: 6, fill: true },
     }).setOrigin(0.5).setDepth(20);
 
-    /* 故事文字:初始透明,火旺后浮现。先占位。 */
-    this.story = this.add.text(W / 2, H * 0.30, '', {
+    this.story = this.add.text(W / 2, H * 0.28, '', {
       fontFamily: '"Cormorant Garamond", serif',
       fontSize: `${30 * SCALE}px`, color: '#ffe8c8', align: 'center',
       lineSpacing: u(10),
@@ -170,31 +207,64 @@ export class FireplaceScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(20).setAlpha(0);
   }
 
+  /* ---------- 打火石:点击触发 ---------- */
+  private strike(_p: Phaser.Input.Pointer): void {
+    if (this.leaving) return;
+    if (this.lit) return;
+
+    this.igniteTries++;
+
+    /* 擦火石:在火焰位置迸一簇白亮火星 */
+    this.sparkBurst();
+
+    if (this.igniteTries >= IGNITE_TRIES) {
+      this.lit = true;
+      this.targetIntensity = LIT_INTENSITY;
+      this.hint.setText('按 E 添柴 · Esc 离开');
+    } else {
+      this.hint.setText('再试一次');
+    }
+  }
+
+  /** 打火石火星:一簇白亮小火星四散 */
+  private sparkBurst(): void {
+    const p = this.add.particles(this.fireX, this.fireY, 'spark', {
+      speed: { min: u(60), max: u(240) },
+      angle: { min: 200, max: 340 },
+      scale: { start: 0.3 * SCALE, end: 0 },
+      alpha: { start: 1, end: 0 },
+      lifespan: { min: 200, max: 500 },
+      tint: [0xffffff, 0xfff2c0, 0xffd27a],
+      blendMode: 'ADD',
+      emitting: false,
+    }).setDepth(6);
+    p.explode(20);
+    this.glowPulse = Math.max(this.glowPulse, 0.5);
+    this.time.delayedCall(700, () => p.destroy());
+  }
+
   /* ---------- 加柴 ---------- */
   private addLog(): void {
+    if (!this.lit) return;
     if (this.logs >= MAX_LOGS) return;
     this.logs++;
-    this.intensity = Math.min(1, BASE_INTENSITY + this.logs * (0.65 / MAX_LOGS) + 0.15);
-    this.applyIntensity();
+    this.targetIntensity = Math.min(1, LIT_INTENSITY + this.logs * (0.65 / MAX_LOGS) + 0.15);
 
-    /* 腾起反馈:一簇火星炸开 + 光晕猛地扩一下 */
-    this.emberEmitter.explode(18, u(FIRE.baseX), u(FIRE.baseY));
+    this.emberEmitter.explode(18, this.fireX, this.fireY);
     this.glowPulse = 1;
 
-    /* 火旺到顶,文字浮现 */
     if (this.logs >= MAX_LOGS) {
       this.revealStory();
-      this.hint.setText('点击离开');
+      this.hint.setText('Esc 离开');
     }
   }
 
   private revealStory(): void {
-    /* TODO 换成你的话。这里先占位。 */
     this.story.setText('炉火正旺。\n这里是关于我的一段话。');
     this.tweens.add({ targets: this.story, alpha: 1, duration: 1400, ease: 'Sine.easeOut' });
   }
 
-  /* ---------- 离开,淡回房间 ---------- */
+  /* ---------- 离开 ---------- */
   private leave(): void {
     if (this.leaving) return;
     this.leaving = true;
@@ -210,14 +280,13 @@ export class FireplaceScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.addLog();
     if (Phaser.Input.Keyboard.JustDown(this.keys.ESC)) this.leave();
 
-    /* 光晕脉动:基础呼吸 + 加柴时的猛扩衰减 */
-    this.glowPulse *= (1 - 3 * dt);
-    const breath = 0.5 + 0.5 * Math.sin(this.time.now / 400);
-    const radius = u(180 + this.intensity * 220 + this.glowPulse * 120);
-    const alpha = 0.12 + this.intensity * 0.22 + breath * 0.05 * this.intensity + this.glowPulse * 0.25;
+    /* 火势平滑逼近目标(由小渐旺) */
+    if (Math.abs(this.intensity - this.targetIntensity) > 0.001) {
+      this.intensity += (this.targetIntensity - this.intensity) * Math.min(1, 2 * dt);
+      this.applyIntensity();
+    }
 
-    this.glow.clear();
-    this.glow.fillStyle(0xff8a3a, Phaser.Math.Clamp(alpha, 0, 0.8));
-    this.glow.fillCircle(u(FIRE.baseX), u(FIRE.baseY - 40), radius);
+    /* 加柴脉动衰减(保留给粒子爆发用) */
+    this.glowPulse *= (1 - 3 * dt);
   }
 }

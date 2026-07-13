@@ -120,7 +120,7 @@ export class RoomScene extends Phaser.Scene {
       { x: 1157, y: 520, range: 150, label: 'Browse the shelf',
         action: () => this.book.open() },
       { x: 1425, y: 525, range: 140, label: 'Look at the desk',
-        action: () => this.dialog.open('The Desk', 'design.md 表② I3/I4 —— 简历、联系方式放这里。') },
+        action: () => this.scene.start('Desk') },
       { x: 1720, y: 520, range: 150, label: 'Look outside',
         action: () => this.dialog.open('The Window', 'design.md 表② 彩蛋 —— 关于窗外夜色的闲话。') },
       { x: 2142, y: 525, range: 170, label: 'Go upstairs',
