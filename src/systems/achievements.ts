@@ -23,12 +23,12 @@ export interface AchievementDef {
 
 /* 所有成就定义。加新成就就往这里加一条。 */
 export const ACHIEVEMENTS: AchievementDef[] = [
-  { id: 'fire',    name: '生火者',   desc: '点燃了壁炉的火',       icon: '🔥' },
-  { id: 'book',    name: '阅读者',   desc: '翻开了书架上的简历',   icon: '📖' },
-  { id: 'music',   name: '聆听者',   desc: '在唱片机上听了一首歌', icon: '🎵' },
-  { id: 'social',  name: '联络者',   desc: '打开了手机上的联系方式', icon: '📱' },
-  { id: 'window',  name: '远眺者',   desc: '望向了窗外',           icon: '🌙' },
-  { id: 'stairs',  name: '探路者',   desc: '走上了楼梯',           icon: '🪜' },
+  { id: 'fire',    name: 'Firekeeper', desc: 'Lit the fireplace',       icon: '🔥' },
+  { id: 'book',    name: 'Reader', desc: 'Opened the resume on the shelf',   icon: '📖' },
+  { id: 'music',   name: 'Listener', desc: 'Played a song on the record player', icon: '🎵' },
+  { id: 'social',  name: 'Reacher', desc: 'Opened the contacts on the phone', icon: '📱' },
+  { id: 'window',  name: 'Stargazer', desc: 'Gazed out the window',           icon: '🌙' },
+  { id: 'stairs',  name: 'Wanderer', desc: 'Climbed the stairs',           icon: '🪜' },
 ];
 
 const STORAGE_KEY = 'ghibli_achievements';
@@ -85,11 +85,16 @@ class AchievementToast {
   constructor(scene: Phaser.Scene, def: AchievementDef) {
     const cardW = 300;
     const cardH = 76;
-    const margin = 24;
-    /* 右上角滑入 */
-    const startX = W + cardW;
-    const targetX = W - cardW / 2 - margin;
-    const y = margin + cardH / 2;
+    const pad = 20;
+    const dispW = u(cardW);
+    const dispH = u(cardH);
+
+    /* 基于相机实际可视区右上角定位,适配任何显示器 */
+    const cam = scene.cameras.main;
+    const v = cam.worldView;
+    const targetX = v.right - u(pad) - dispW / 2;
+    const y = v.top + u(pad) + dispH / 2;
+    const startX = v.right + dispW;   // 从可视区右边界外滑入
 
     const c = scene.add.container(startX, y).setScrollFactor(0).setDepth(3000);
 
@@ -107,7 +112,7 @@ class AchievementToast {
     }).setOrigin(0.5);
     c.add(icon);
 
-    const label = scene.add.text(u(-cardW / 2 + 64), u(-14), '解锁成就', {
+    const label = scene.add.text(u(-cardW / 2 + 64), u(-14), 'Achievement Unlocked', {
       fontFamily: '"Nunito", sans-serif', fontSize: `${12 * SCALE}px`, color: '#c8a880',
     }).setOrigin(0, 0.5);
     c.add(label);
@@ -150,26 +155,23 @@ export class AchievementPanel {
   }
 
   private buildEntry(): void {
-    const size = 46;                 // 图标圆牌直径
-    const margin = 22;
-    const x = W - margin - u(size / 2);
-    const y = margin + u(size / 2);
+    const size = 46;
+    const pad = 20;
 
-    this.entry = this.scene.add.container(x, y).setScrollFactor(0).setDepth(1500);
+    this.entry = this.scene.add.container(0, 0).setScrollFactor(0).setDepth(1500);
 
     const g = this.scene.add.graphics();
     g.fillStyle(0x000000, 0.35);
-    g.fillCircle(u(2), u(3), u(size / 2));            // 投影
-    g.fillStyle(0x2a1f16, 0.95);                     // 暖木底
+    g.fillCircle(u(2), u(3), u(size / 2));
+    g.fillStyle(0x2a1f16, 0.95);
     g.fillCircle(0, 0, u(size / 2));
-    g.lineStyle(u(2), 0xc8783c, 0.9);                // 暖橙描边
+    g.lineStyle(u(2), 0xc8783c, 0.9);
     g.strokeCircle(0, 0, u(size / 2));
     this.entry.add(g);
 
     const icon = this.scene.add.text(0, 0, '🏆', { fontSize: `${22 * SCALE}px` }).setOrigin(0.5);
     this.entry.add(icon);
 
-    /* 点击热区 */
     const hit = this.scene.add.circle(0, 0, u(size / 2), 0xffffff, 0.001)
       .setInteractive({ useHandCursor: true });
     this.entry.add(hit);
@@ -179,6 +181,19 @@ export class AchievementPanel {
       e.stopPropagation();
       this.toggle();
     });
+
+    /* 关键:每帧把入口贴到相机"实际可视区"的右上角,适配任何显示器 */
+    const reposition = () => {
+      const cam = this.scene.cameras.main;
+      const v = cam.worldView;   // 当前真正能看到的世界范围
+      this.entry.setPosition(
+        v.right - u(pad) - u(size / 2),
+        v.top + u(pad) + u(size / 2),
+      );
+    };
+    reposition();
+    this.scene.events.on('update', reposition);
+    this.scene.events.once('shutdown', () => this.scene.events.off('update', reposition));
   }
 
   toggle(): void {
@@ -202,7 +217,9 @@ export class AchievementPanel {
     /* 标题 + 进度 */
     const total = ACHIEVEMENTS.length;
     const got = Achievements.unlockedCount();
-    const title = this.scene.add.text(0, u(-H / (2 * SCALE) + 70), `成就  ${got}/${total}`, {
+    const camView = this.scene.cameras.main.worldView;
+    const halfVisH = camView.height / 2;   // 可视区半高
+    const title = this.scene.add.text(0, -halfVisH + u(60), `Achievements  ${got}/${total}`, {
       fontFamily: '"Nunito", sans-serif', fontSize: `${28 * SCALE}px`,
       fontStyle: 'bold', color: '#ffe8c8',
     }).setOrigin(0.5);
@@ -241,7 +258,7 @@ export class AchievementPanel {
       this.root!.add(name);
 
       const desc = this.scene.add.text(u(-listW / 2 + 84), u(y + 12),
-        unlocked ? def.desc : '尚未解锁', {
+        unlocked ? def.desc : 'Locked', {
         fontFamily: '"Nunito", sans-serif', fontSize: `${13 * SCALE}px`,
         color: unlocked ? '#c8a880' : '#555',
       }).setOrigin(0, 0.5);
@@ -249,7 +266,7 @@ export class AchievementPanel {
     });
 
     /* 底部提示 */
-    const hint = this.scene.add.text(0, u(H / (2 * SCALE) - 60), 'Tab 关闭', {
+    const hint = this.scene.add.text(0, halfVisH - u(45), 'Tab or Esc to close', {
       fontFamily: '"Nunito", sans-serif', fontSize: `${14 * SCALE}px`, color: '#c8a880',
     }).setOrigin(0.5);
     this.root.add(hint);

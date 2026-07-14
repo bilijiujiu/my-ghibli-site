@@ -28,6 +28,9 @@ const HERO_Y_OFFSET = 86;
 
 const WIN = { x: 1616, y: 274, w: 1792 - 1616, h: 437 - 274 };
 
+/* 记住离开房间时的位置。首次为 null(开场从左侧进入),从子场景返回时恢复。 */
+let savedPos: { x: number; y: number } | null = null;
+
 export class RoomScene extends Phaser.Scene {
   private pos = { x: START_X, y: START_Y };
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -53,7 +56,8 @@ export class RoomScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.pos = { x: START_X, y: START_Y };
+    /* 从子场景返回时恢复上次位置;首次开场用起点 */
+    this.pos = savedPos ? { ...savedPos } : { x: START_X, y: START_Y };
 
     this.paintScene();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,E') as any;
@@ -103,11 +107,11 @@ export class RoomScene extends Phaser.Scene {
   private buildInteractives(): void {
     this.interactives = [
       { x: 609, y: 520, range: 150, label: 'Warm up by the fire',
-        action: () => this.scene.start('Fireplace') },
+        action: () => { savedPos = { ...this.pos }; this.scene.start('Fireplace'); } },
       { x: 1157, y: 520, range: 150, label: 'Browse the shelf',
         action: () => { Achievements.unlock('book', this); this.book.open(); } },
       { x: 1425, y: 525, range: 140, label: 'Look at the desk',
-        action: () => this.scene.start('Desk') },
+        action: () => { savedPos = { ...this.pos }; this.scene.start('Desk'); } },
       { x: 1720, y: 520, range: 150, label: 'Look outside',
         action: () => { Achievements.unlock('window', this); this.dialog.open('The Window', 'design.md 表2 彩蛋 -- 关于窗外夜色的闲话。'); } },
       { x: 2142, y: 525, range: 170, label: 'Go upstairs',
