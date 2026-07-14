@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { W, H, u, SCALE } from '../config/constants';
 import { PhoneOverlay } from '../systems/PhoneOverlay';
 import { RecordPlayerOverlay } from '../systems/RecordPlayerOverlay';
+import { Achievements, AchievementPanel } from '../systems/achievements';
 
 /**
  * 桌子近景 · 独立一幕。俯视桌面,四样物件各是一个入口。
@@ -40,6 +41,7 @@ export class DeskScene extends Phaser.Scene {
   private coordText?: Phaser.GameObjects.Text;
   private phone!: PhoneOverlay;
   private player!: RecordPlayerOverlay;
+  private achPanel!: AchievementPanel;
 
   constructor() { super('Desk'); }
 
@@ -73,6 +75,7 @@ export class DeskScene extends Phaser.Scene {
 
     this.phone = new PhoneOverlay(this);
     this.player = new RecordPlayerOverlay(this);
+    this.achPanel = new AchievementPanel(this);
 
     this.keys = this.input.keyboard!.addKeys('ESC') as any;
 
@@ -102,16 +105,16 @@ export class DeskScene extends Phaser.Scene {
     }
   }
 
-  /** 点击物件:手机→social,吉他→唱片机,其余先占位 */
+  /** Click an item: phone → social, guitar → record player, others TBD */
   private openItem(key: string): void {
-    if (key === 'phone') { this.phone.open(); return; }
-    if (key === 'guitar') { this.player.open(); return; }
-    console.log('点击物件:', key);
-    // TODO: album/coffee 各自的面板
+    if (key === 'phone') { Achievements.unlock('social', this); this.phone.open(); return; }
+    if (key === 'guitar') { Achievements.unlock('music', this); this.player.open(); return; }
+    console.log('clicked item:', key);
+    // TODO: album / coffee panels
   }
 
   private buildHUD(): void {
-    this.add.text(W / 2, H - u(50), 'Esc 离开', {
+    this.add.text(W / 2, H - u(50), 'Esc to leave', {
       fontFamily: '"Nunito", sans-serif',
       fontSize: `${16 * SCALE}px`, color: 'rgba(255,240,220,.85)',
       shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,.7)', blur: 6, fill: true },
@@ -138,7 +141,8 @@ export class DeskScene extends Phaser.Scene {
     this.player.update(delta / 1000);
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.ESC)) {
-      if (this.phone.isOpen) { this.phone.close(); }
+      if (this.achPanel.isOpen) { this.achPanel.close(); }
+      else if (this.phone.isOpen) { this.phone.close(); }
       else if (this.player.isOpen) { this.player.close(); }
       else { this.leave(); }
     }

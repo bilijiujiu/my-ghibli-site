@@ -4,8 +4,8 @@ import { Dialog } from '../systems/dialog';
 import { HeroRig } from '../entities/HeroRig';
 import { BookOverlay } from '../systems/BookOverlay';
 import { RainWindow } from '../systems/RainWindow';
+import { Achievements, AchievementPanel } from '../systems/achievements';
 
-/** 交互点:对应 design.md 表② */
 interface Interactive {
   x: number;
   y: number;
@@ -14,28 +14,18 @@ interface Interactive {
   action: () => void;
 }
 
-/**
- * 第三幕:室内探索(room.webp 长卷)。
- * 布局:门(左) → 壁炉 → 书架 → 桌子 → 窗 → 楼梯(右)
- * 角色:剪纸骨架(HeroRig),WASD 移动,四肢摆动。
- */
+const DEBUG = false;
 
-/* ===== 标定开关 ===== */
-const DEBUG = true;
-
-/* ===== 房间参数 ===== */
 const ROOM_H = 620;
-const ROOM_W = ROOM_H * 4;   // 2480
+const ROOM_W = ROOM_H * 4;
 const MOVE_SPEED = 320;
 const START_X = 150;
 const START_Y = 520;
 const BOUNDS = { minX: 120, maxX: ROOM_W - 120, minY: 480, maxY: 570 };
 
-/* ===== 角色参数(调这里) ===== */
-const HERO_SCALE = 0.48;      // 角色整体缩放
-const HERO_Y_OFFSET = 86;    // 容器中心相对脚底的偏移 = 550(原图) × HERO_SCALE
+const HERO_SCALE = 0.48;
+const HERO_Y_OFFSET = 86;
 
-/* ===== 窗户区域(你量的坐标:左上1616,274 右下1792,437) ===== */
 const WIN = { x: 1616, y: 274, w: 1792 - 1616, h: 437 - 274 };
 
 export class RoomScene extends Phaser.Scene {
@@ -44,6 +34,7 @@ export class RoomScene extends Phaser.Scene {
   private dialog!: Dialog;
   private book!: BookOverlay;
   private rain!: RainWindow;
+  private achPanel!: AchievementPanel;
   private rig!: HeroRig;
   private heroShadow!: Phaser.GameObjects.Ellipse;
   private interactives: Interactive[] = [];
@@ -68,12 +59,12 @@ export class RoomScene extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,E') as any;
     this.dialog = new Dialog(this);
     this.book = new BookOverlay(this);
+    this.achPanel = new AchievementPanel(this);
 
     this.buildInteractives();
     this.buildHero();
     this.buildHUD();
 
-    /* 窗户玻璃雨滴(一直下) */
     this.rain = new RainWindow(this, WIN);
 
     const cam = this.cameras.main;
@@ -90,20 +81,16 @@ export class RoomScene extends Phaser.Scene {
     const scale = u(ROOM_H) / src.height;
     this.add.image(0, 0, 'room').setOrigin(0, 0).setScale(scale).setDepth(0);
 
-    /* 壁炉火光呼吸 */
     const fireGlow = this.add.circle(u(609), u(424), u(130), 0xff9a3c, 0.10).setDepth(1);
     this.tweens.add({ targets: fireGlow, alpha: 0.20, duration: 900, yoyo: true, repeat: -1 });
 
-    /* 吊灯光晕呼吸 */
     const lampGlow = this.add.circle(u(660), u(90), u(85), 0xffd88a, 0.08).setDepth(1);
     this.tweens.add({ targets: lampGlow, alpha: 0.16, duration: 1400, yoyo: true, repeat: -1 });
 
-    /* 桌上油灯的微光 */
     const deskLamp = this.add.circle(u(1470), u(360), u(70), 0xffc870, 0.08).setDepth(1);
     this.tweens.add({ targets: deskLamp, alpha: 0.15, duration: 1200, yoyo: true, repeat: -1 });
   }
 
-  /** 角色:落地阴影 + 剪纸骨架 */
   private buildHero(): void {
     this.heroShadow = this.add.ellipse(u(START_X), u(START_Y), u(56), u(13), 0x000000, 0.25)
       .setDepth(499);
@@ -118,13 +105,13 @@ export class RoomScene extends Phaser.Scene {
       { x: 609, y: 520, range: 150, label: 'Warm up by the fire',
         action: () => this.scene.start('Fireplace') },
       { x: 1157, y: 520, range: 150, label: 'Browse the shelf',
-        action: () => this.book.open() },
+        action: () => { Achievements.unlock('book', this); this.book.open(); } },
       { x: 1425, y: 525, range: 140, label: 'Look at the desk',
         action: () => this.scene.start('Desk') },
       { x: 1720, y: 520, range: 150, label: 'Look outside',
-        action: () => this.dialog.open('The Window', 'design.md 表② 彩蛋 —— 关于窗外夜色的闲话。') },
+        action: () => { Achievements.unlock('window', this); this.dialog.open('The Window', 'design.md 表2 彩蛋 -- 关于窗外夜色的闲话。'); } },
       { x: 2142, y: 525, range: 170, label: 'Go upstairs',
-        action: () => this.dialog.open('Upstairs', '楼上还在整理中 —— 毕业设计正在酝酿。过阵子回来看看?') },
+        action: () => { Achievements.unlock('stairs', this); this.dialog.open('Upstairs', '楼上还在整理中 -- 毕业设计正在酝酿。过阵子回来看看?'); } },
     ];
 
     const bubbleY: Record<number, number> = {
@@ -172,7 +159,7 @@ export class RoomScene extends Phaser.Scene {
       u(BOUNDS.maxX - BOUNDS.minX), u(BOUNDS.maxY - BOUNDS.minY), 0x00ff88, 0.08,
     ).setStrokeStyle(3, 0x00ff88, 0.8).setDepth(949);
 
-    this.coordText = this.add.text(u(20), u(20), 'DEBUG: 点击画面获取坐标', {
+    this.coordText = this.add.text(u(20), u(20), 'DEBUG: dianji huoqu zuobiao', {
       fontFamily: 'monospace',
       fontSize: `${16 * SCALE}px`, color: '#0f8',
       backgroundColor: 'rgba(0,0,0,.85)', padding: { x: 12, y: 8 },
@@ -181,7 +168,7 @@ export class RoomScene extends Phaser.Scene {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       const x = Math.round(p.worldX / SCALE);
       const y = Math.round(p.worldY / SCALE);
-      this.coordText?.setText(`DEBUG 坐标: x=${x}, y=${y}`);
+      this.coordText?.setText(`x=${x}, y=${y}`);
       console.log(`x=${x}, y=${y}`);
     });
   }
@@ -191,10 +178,13 @@ export class RoomScene extends Phaser.Scene {
     const k = this.keys;
     const touch = (window as any).__touch || {};
 
-    /* 窗户雨滴:一直下,不受开书/开对话影响 */
     this.rain.update(dt);
 
-    /* 书打开时:E 关书,吃掉其他输入,角色待机 */
+    if (this.achPanel.isOpen) {
+      this.rig.update(dt, false);
+      return;
+    }
+
     if (this.book.isOpen) {
       if (Phaser.Input.Keyboard.JustDown(k.E) || touch.e) { touch.e = false; this.book.close(); }
       this.rig.update(dt, false);
@@ -216,7 +206,6 @@ export class RoomScene extends Phaser.Scene {
     this.pos.x = Phaser.Math.Clamp(this.pos.x + MOVE_SPEED * dx * dt, BOUNDS.minX, BOUNDS.maxX);
     this.pos.y = Phaser.Math.Clamp(this.pos.y + MOVE_SPEED * 0.5 * dy * dt, BOUNDS.minY, BOUNDS.maxY);
 
-    /* ---- 角色 ---- */
     const moving = dx !== 0 || dy !== 0;
     this.rig.update(dt, moving);
     if (dx !== 0) this.rig.setDirection(dx);
@@ -224,12 +213,10 @@ export class RoomScene extends Phaser.Scene {
     this.rig.c.setPosition(u(this.pos.x), u(this.pos.y) - u(HERO_Y_OFFSET));
     this.heroShadow.setPosition(u(this.pos.x), u(this.pos.y));
 
-    /* 相机跟随 */
     const cam = this.cameras.main;
     cam.scrollX += (u(this.pos.x) - W / 2 - cam.scrollX) * 0.08;
     cam.scrollY = 0;
 
-    /* 交互检测 */
     let near: Interactive | null = null;
     let minDist = Infinity;
     for (const it of this.interactives) {

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { W, H, u, SCALE } from '../config/constants';
+import { Achievements } from '../systems/achievements';
 
 /**
  * 壁炉近景 · 独立一幕。
@@ -192,7 +193,7 @@ export class FireplaceScene extends Phaser.Scene {
 
   /* ---------- UI ---------- */
   private buildUI(): void {
-    this.hint = this.add.text(W / 2, H - u(70), '点击柴堆打火', {
+    this.hint = this.add.text(W / 2, H - u(70), 'Click the logs to strike a light', {
       fontFamily: '"Nunito", sans-serif',
       fontSize: `${17 * SCALE}px`, color: 'rgba(255,240,220,.9)',
       shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,.7)', blur: 6, fill: true },
@@ -220,9 +221,10 @@ export class FireplaceScene extends Phaser.Scene {
     if (this.igniteTries >= IGNITE_TRIES) {
       this.lit = true;
       this.targetIntensity = LIT_INTENSITY;
-      this.hint.setText('按 E 添柴 · Esc 离开');
+      this.hint.setText('Press E to add wood · Esc to leave');
+      Achievements.unlock('fire', this);
     } else {
-      this.hint.setText('再试一次');
+      this.hint.setText('Try again');
     }
   }
 
@@ -255,12 +257,12 @@ export class FireplaceScene extends Phaser.Scene {
 
     if (this.logs >= MAX_LOGS) {
       this.revealStory();
-      this.hint.setText('Esc 离开');
+      this.hint.setText('Esc to leave');
     }
   }
 
   private revealStory(): void {
-    this.story.setText('炉火正旺。\n这里是关于我的一段话。');
+    this.story.setText('The fire is warm now.\nA few words about me go here.');
     this.tweens.add({ targets: this.story, alpha: 1, duration: 1400, ease: 'Sine.easeOut' });
   }
 
