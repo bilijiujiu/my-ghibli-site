@@ -53,6 +53,7 @@ export class RoomScene extends Phaser.Scene {
     this.load.image('hero_leg', '/hero_base_leg.png');
     this.load.image('hero_torso', '/hero_base_body.png');
     this.load.image('book_open', '/book_open.png');
+    this.load.image('page_paper', '/page_paper.png');
   }
 
   create(): void {
@@ -113,7 +114,7 @@ export class RoomScene extends Phaser.Scene {
       { x: 1425, y: 525, range: 140, label: 'Look at the desk',
         action: () => { savedPos = { ...this.pos }; this.scene.start('Desk'); } },
       { x: 1720, y: 520, range: 150, label: 'Look outside',
-        action: () => { Achievements.unlock('window', this); this.dialog.open('The Window', 'design.md 表2 彩蛋 -- 关于窗外夜色的闲话。'); } },
+  action: () => { savedPos = { ...this.pos }; this.scene.start('Window'); } },
       { x: 2142, y: 525, range: 170, label: 'Go upstairs',
         action: () => { Achievements.unlock('stairs', this); this.dialog.open('Upstairs', '楼上还在整理中 -- 毕业设计正在酝酿。过阵子回来看看?'); } },
     ];
