@@ -2,3 +2,6 @@ node_modules/
 dist/
 .DS_Store
 *.local
+
+# 被替换掉的旧素材,留着只是保险
+public/*.unused

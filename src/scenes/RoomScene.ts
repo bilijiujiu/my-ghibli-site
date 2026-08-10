@@ -24,7 +24,14 @@ const START_Y = 520;
 const BOUNDS = { minX: 120, maxX: ROOM_W - 120, minY: 480, maxY: 570 };
 
 const HERO_SCALE = 0.48;
-const HERO_Y_OFFSET = 86;
+/*
+ * 新骨架的原点在脚底。但 pos.y 并不是地板线 —— 可行走带 BOUNDS 是 480~570,
+ * 而 room.webp 里 x≈150 处墙裙与地板的交界在逻辑 y≈565,往右到壁炉一带约 545。
+ * 也就是说 pos.y 更像是"腰线",要再往下压这么多,靴底才真正踩在地板上。
+ * (旧骨架的原点在 1200px 画布正中,配合 HERO_Y_OFFSET=86 正好也是这个落点,
+ *  所以这个值同时保证了交互气泡、遮挡关系这些按老位置调过的东西不跑偏。)
+ */
+const HERO_FOOT_DROP = 55;
 
 const WIN = { x: 1616, y: 274, w: 1792 - 1616, h: 437 - 274 };
 
@@ -48,10 +55,7 @@ export class RoomScene extends Phaser.Scene {
 
   preload(): void {
     this.load.image('room', '/room.webp');
-    this.load.image('hero_head', '/hero_base_head.png');
-    this.load.image('hero_arm', '/hero_base_arm.png');
-    this.load.image('hero_leg', '/hero_base_leg.png');
-    this.load.image('hero_torso', '/hero_base_body.png');
+    HeroRig.preload(this);
     this.load.image('book_open', '/book_open.png');
     this.load.image('page_paper', '/page_paper.png');
   }
@@ -96,11 +100,18 @@ export class RoomScene extends Phaser.Scene {
     this.tweens.add({ targets: deskLamp, alpha: 0.15, duration: 1200, yoyo: true, repeat: -1 });
   }
 
+  /** 角色脚底(以及影子)应该落在的画布 y */
+  private footY(logicalY: number): number {
+    return u(logicalY + HERO_FOOT_DROP);
+  }
+
   private buildHero(): void {
-    this.heroShadow = this.add.ellipse(u(START_X), u(START_Y), u(56), u(13), 0x000000, 0.25)
+    /* 影子跟脚底同一条线 —— 旧代码把影子画在 pos.y,比脚底高了 55px,
+       所以那团椭圆其实浮在小腿肚位置,人看着不像踩在地上。 */
+    this.heroShadow = this.add.ellipse(u(START_X), this.footY(START_Y), u(56), u(13), 0x000000, 0.25)
       .setDepth(499);
 
-    this.rig = new HeroRig(this, u(START_X), u(START_Y) - u(HERO_Y_OFFSET));
+    this.rig = new HeroRig(this, u(START_X), this.footY(START_Y));
     this.rig.c.setScale(HERO_SCALE);
     this.rig.c.setDepth(500);
   }
@@ -215,8 +226,8 @@ export class RoomScene extends Phaser.Scene {
     this.rig.update(dt, moving);
     if (dx !== 0) this.rig.setDirection(dx);
 
-    this.rig.c.setPosition(u(this.pos.x), u(this.pos.y) - u(HERO_Y_OFFSET));
-    this.heroShadow.setPosition(u(this.pos.x), u(this.pos.y));
+    this.rig.c.setPosition(u(this.pos.x), this.footY(this.pos.y));
+    this.heroShadow.setPosition(u(this.pos.x), this.footY(this.pos.y));
 
     const cam = this.cameras.main;
     cam.scrollX += (u(this.pos.x) - W / 2 - cam.scrollX) * 0.08;
@@ -239,4 +250,4 @@ export class RoomScene extends Phaser.Scene {
       near.action();
     }
   }
-}
+}
