@@ -5,6 +5,7 @@ import { HeroRig } from '../entities/HeroRig';
 import { BookOverlay } from '../systems/BookOverlay';
 import { RainWindow } from '../systems/RainWindow';
 import { Achievements, AchievementPanel } from '../systems/achievements';
+import { playStairs } from '../systems/AtticAudio';
 
 interface Interactive {
   x: number;
@@ -50,6 +51,7 @@ export class RoomScene extends Phaser.Scene {
   private interactives: Interactive[] = [];
   private prompts: Map<Interactive, Phaser.GameObjects.Container> = new Map();
   private coordText?: Phaser.GameObjects.Text;
+  private climbing = false;
 
   constructor() { super('Room'); }
 
@@ -63,6 +65,7 @@ export class RoomScene extends Phaser.Scene {
   create(): void {
     /* 从子场景返回时恢复上次位置;首次开场用起点 */
     this.pos = savedPos ? { ...savedPos } : { x: START_X, y: START_Y };
+    this.climbing = false;
 
     this.paintScene();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,E') as any;
@@ -83,6 +86,23 @@ export class RoomScene extends Phaser.Scene {
     cam.fadeIn(900, 255, 224, 176);
 
     if (DEBUG) this.buildDebug();
+  }
+
+  /**
+   * 上楼:镜头顺着楼梯往右上方摇、慢慢推近,木楼梯一步一响,
+   * 摇到一半画面暗下去,接阁楼(AtticScene 从黑里亮起来,两边接得上)。
+   */
+  private climbStairs(): void {
+    if (this.climbing) return;
+    this.climbing = true;
+    savedPos = { ...this.pos };
+    Achievements.unlock('stairs', this);
+    playStairs(7, 0.3);
+    const cam = this.cameras.main;
+    cam.pan(u(2300), u(250), 1800, 'Sine.easeIn');
+    cam.zoomTo(1.35, 1800, 'Sine.easeIn');
+    this.time.delayedCall(1000, () => cam.fadeOut(800, 0, 0, 0));
+    cam.once('camerafadeoutcomplete', () => this.scene.start('Attic'));
   }
 
   private paintScene(): void {
@@ -127,7 +147,7 @@ export class RoomScene extends Phaser.Scene {
       { x: 1720, y: 520, range: 150, label: 'Look outside',
   action: () => { savedPos = { ...this.pos }; this.scene.start('Window'); } },
       { x: 2142, y: 525, range: 170, label: 'Go upstairs',
-        action: () => { Achievements.unlock('stairs', this); this.dialog.open('Upstairs', '楼上还在整理中 -- 毕业设计正在酝酿。过阵子回来看看?'); } },
+        action: () => this.climbStairs() },
     ];
 
     const bubbleY: Record<number, number> = {
@@ -250,4 +270,4 @@ export class RoomScene extends Phaser.Scene {
       near.action();
     }
   }
-}
+}

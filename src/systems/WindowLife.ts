@@ -51,18 +51,32 @@ export class WindowLife {
     this.drawBirds(dt, birdRate, birdDir, light);
   }
 
+  /**
+   * 雨:分三层画 —— 远处的细、短、淡,近处的稍粗稍亮。
+   * 原来所有雨丝一个粗细一个透明度,像一张划痕贴图;分层以后有前后,雨才"下"在空气里。
+   */
   private drawRain(dt: number, amount: number, light: number): void {
     this.gRain.clear();
     if (amount < 0.02) return;
     const n = Math.floor(this.drops.length * amount);
-    const slant = 0.28;
-    this.gRain.lineStyle(2, 0xbcd0e8, 0.34 * amount * (0.35 + light * 0.65));
-    for (let i = 0; i < n; i++) {
-      const d = this.drops[i];
-      d.y += d.v * dt;
-      d.x += d.v * slant * dt;
-      if (d.y > this.H) { d.y = -30; d.x = Math.random() * this.W - 60; }
-      this.gRain.lineBetween(d.x, d.y, d.x - d.len * slant, d.y - d.len);
+    const slant = 0.22;
+    const LAYERS = [
+      { w: 1.2, a: 0.16, l: 0.55 },   // 远
+      { w: 1.6, a: 0.24, l: 0.8 },    // 中
+      { w: 2.2, a: 0.30, l: 1.0 },    // 近
+    ];
+    for (let L = 0; L < 3; L++) {
+      const ly = LAYERS[L];
+      this.gRain.lineStyle(ly.w, 0xd6e2f0, ly.a * Math.min(1, amount * 1.6) * (0.35 + light * 0.65));
+      for (let i = L; i < n; i += 3) {
+        const d = this.drops[i];
+        const v = d.v * (0.6 + ly.l * 0.4);
+        d.y += v * dt;
+        d.x += v * slant * dt;
+        if (d.y > this.H) { d.y = -30; d.x = Math.random() * this.W - 60; }
+        const len = d.len * ly.l;
+        this.gRain.lineBetween(d.x, d.y, d.x - len * slant, d.y - len);
+      }
     }
   }
 

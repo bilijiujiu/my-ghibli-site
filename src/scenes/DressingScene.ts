@@ -1,12 +1,14 @@
 import Phaser from 'phaser';
 import { W, H, u, SCALE } from '../config/constants';
-import { HeroRig } from '../entities/HeroRig';
-import { RIG } from '../config/heroRig';
 import { addGlow } from '../systems/glow';
+import { playDoorCreak } from '../systems/AtticAudio';
 
 /**
  * 第二幕:门廊近景过场(porch.webp)。
- * 主角从左走入 → 走到台阶前 → 门在他靠近时缓缓推开 → 点击走进门 → 第三幕。
+ * 镜头就是访客本人,画面里不放人物:
+ *   淡入 → 镜头极慢地往前"呼吸" → 门自己虚掩着推开一条缝(邀请)→ 欢迎语浮现
+ *   → 点击:门吱呀一声推大,镜头加速推进门缝,暖光漫过整个画面 → 第三幕。
+ * 原来是主角从左边走进来,但人物和门廊原画画风不一样,而且走路要等好几秒。
  *
  * porch.webp 是一张生成的整图,但"生成图不能动"是个误会:
  * 把该动的那块抠出来、底下缺的补上,剩下的交给光,这一幕就活了。
@@ -29,23 +31,17 @@ const P = {
   pool: { x: 5000, y: 2600 },      // 光洒在门廊地板上的那一摊
   door: { x0: 5300, x1: 5775, y0: 360, y1: 2440 },   // 门板(x1 = 铰链)
   room: { x0: 5130, y0: 360 },                       // 门后室内补片
-  /* 主角停下时脚底的位置。y 不能超过 3500 —— 图是按 max 比例铺满的,
-     纵向被裁掉了上下各 264 原图像素,3500 以下永远在画面外,脚会被切掉。 */
-  heroFoot: { x: 3657, y: 3470 },
-  heroStart: { x: 1500, y: 3470 },
 };
 
-const HERO_PIX_H = 560;      // 主角在画布上的高度。按门高和栏杆高反推 —— 原来 358 是个小孩。
+const ARRIVE_MS = 1100;      // 淡入后多久门开始推开、欢迎语出现
 const DOOR_AJAR = 1.0;       // 原画里门本来就虚掩着
 const DOOR_OPEN = 0.46;      // 主角走到跟前时开到这么大
 const DOOR_WIDE = 0.26;      // 进门那一下再推开一点
-const TEXT_X = 260, TEXT_Y = 240;
+/* 欢迎语左对齐、离左边留足余量。原来是以 x=260 居中,一行字宽 ~575 逻辑像素,
+   左半截已经伸到画布外面;ENVELOP 缩放在宽屏上还会再裁掉两边,所以开头的 "T" 被切了。 */
+const TEXT_X = 70, TEXT_Y = 215;
 
 export class DressingScene extends Phaser.Scene {
-  private hero!: HeroRig;
-  private walkTarget: number | null = null;
-  private walkSpeed = 0;
-  private onArrive?: () => void;
 
   private imgScale = 1;   /* 不能叫 scale —— Phaser.Scene 自己有个 scale(ScaleManager) */
   private welcome!: Phaser.GameObjects.Container;
@@ -57,7 +53,6 @@ export class DressingScene extends Phaser.Scene {
   private windowGlow!: Phaser.GameObjects.Image;
   private slitGlow!: Phaser.GameObjects.Image;
   private pool!: Phaser.GameObjects.Image;
-  private shadow!: Phaser.GameObjects.Ellipse;
   private dusk!: Phaser.GameObjects.Rectangle;
   private motes: { o: Phaser.GameObjects.Image; x: number; y: number; ph: number; sp: number }[] = [];
   private clouds: Phaser.GameObjects.Image[] = [];
@@ -71,9 +66,7 @@ export class DressingScene extends Phaser.Scene {
     this.load.image('porch', '/porch.webp');
     this.load.image('porch_room', '/porch_room.webp');
     this.load.image('porch_door', '/porch_door.webp');
-    this.load.image('cloud1', '/cloud1.png');
     this.load.on('loaderror', () => { /* 缺素材就退回静态,不报致命错 */ });
-    HeroRig.preload(this);
   }
 
   /* 原图坐标 → 画布坐标。图是按 max(W/w, H/h) 铺满并居中的。 */
@@ -91,24 +84,20 @@ export class DressingScene extends Phaser.Scene {
     this.buildLights();
     this.buildWelcome();
 
-    /* 主角:不做成纯黑剪影 —— 门廊是暖光场景,压成暖褐比压成黑更像"背光下的人",
-       也保得住新骨架那身水彩笔触。 */
-    this.hero = new HeroRig(this, this.sx(P.heroStart.x), this.sy(P.heroStart.y));
-    this.hero.c.setScale(HERO_PIX_H / RIG.height).setDepth(10);
-    this.hero.silhouette(0x8a6a52, 0.97);
-    this.shadow = this.add.ellipse(0, 0, u(40), u(11), 0x2a1c12, 0.30).setDepth(9);
-
+    /* 镜头:从暖白淡入,然后一直极慢地往前推 —— 站在门廊上不是静止的照片,是在"走近" */
     const cam = this.cameras.main;
-    cam.fadeIn(700, 250, 246, 238);
-    cam.setZoom(1.06);
-    cam.zoomTo(1, 900, 'Sine.easeOut');
+    cam.fadeIn(900, 250, 246, 238);
+    /* 起点就放大一点:原图按宽度刚好铺满,zoom 一旦小于 1 两边就会露出画布底色 */
+    cam.setZoom(1.03);
+    this.tweens.add({ targets: cam, zoom: 1.075, duration: 14000, ease: 'Sine.easeInOut' });
 
-    /* 走入 → 停在台阶前 → 门推开 + 欢迎语淡入 */
-    this.walkTo(this.sx(P.heroFoot.x), 2600, () => {
+    /* 门自己推开一条缝,欢迎语和提示随后浮现 */
+    this.time.delayedCall(ARRIVE_MS, () => {
       this.arrived = true;
-      this.swingDoor(DOOR_OPEN, 1600, 'Sine.easeOut');
-      this.tweens.add({ targets: this.welcome, alpha: 1, duration: 800 });
-      this.tweens.add({ targets: this.hint, alpha: 0.85, duration: 800, delay: 400 });
+      this.swingDoor(DOOR_OPEN, 2400, 'Sine.easeInOut');
+      playDoorCreak(0.5);
+      this.tweens.add({ targets: this.welcome, alpha: 1, duration: 1000, delay: 500 });
+      this.tweens.add({ targets: this.hint, alpha: 0.85, duration: 800, delay: 1400 });
     });
 
     this.input.on('pointerdown', () => { if (this.arrived) this.enter(); });
@@ -120,16 +109,9 @@ export class DressingScene extends Phaser.Scene {
     this.imgScale = Math.max(W / src.width, H / src.height);
     this.add.image(W / 2, H / 2, 'porch').setScale(this.imgScale).setDepth(0);
 
-    /* 云:只在左边天空那一带飘。右半边是门廊,飘过去就穿帮了。 */
-    if (this.textures.exists('cloud1')) {
-      for (let i = 0; i < 3; i++) {
-        const c = this.add.image(Phaser.Math.Between(0, Math.round(W * 0.45)),
-                                 Phaser.Math.Between(u(60), u(210)), 'cloud1')
-          .setDepth(1).setAlpha(0.22).setScale(0.30 + Math.random() * 0.22);
-        (c as any)._sp = u(2.5 + Math.random() * 2.5);
-        this.clouds.push(c);
-      }
-    }
+    /* 原来这里叠了三张 cloud1.png(6752px 宽,缩到 0.3~0.5 也有两三千像素)、22% 透明度,
+       说是"只在左边天空飘",其实每张都宽到盖住门廊的柱子、灯和墙,画面上就是几团发白的雾。
+       porch.webp 里本来就画着云,不需要再叠。 */
 
     /* 门后的室内 + 门板。门板的原点放在右边铰链上,scaleX 一变就是绕铰链开合。 */
     if (this.textures.exists('porch_room')) {
@@ -178,19 +160,20 @@ export class DressingScene extends Phaser.Scene {
       fontFamily: '"Cormorant Garamond", serif',
       fontSize: `${32 * SCALE}px`, color: '#fffaf0',
       shadow: { offsetX: 0, offsetY: 2 * SCALE, color: 'rgba(20,20,40,0.6)', blur: 10 * SCALE, fill: true },
-    }).setOrigin(0.5);
-    const l2 = this.add.text(0, u(46), 'Come inside.', {
+    }).setOrigin(0, 0.5);
+    const l2 = this.add.text(u(4), u(48), 'Come inside.', {
       fontFamily: '"Cormorant Garamond", serif',
       fontSize: `${32 * SCALE}px`, fontStyle: 'italic', color: '#fffaf0',
       shadow: { offsetX: 0, offsetY: 2 * SCALE, color: 'rgba(20,20,40,0.6)', blur: 10 * SCALE, fill: true },
-    }).setOrigin(0.5);
+    }).setOrigin(0, 0.5);
     this.welcome.add([l1, l2]);
 
-    this.hint = this.add.text(W / 2, H - u(60), '— Click to step inside —', {
+    /* 提示放在欢迎语下面:原来在画面底部正中,正好压在主角腿上 */
+    this.hint = this.add.text(u(TEXT_X + 4), u(TEXT_Y + 112), '— Click to step inside', {
       fontFamily: '"Nunito", sans-serif',
       fontSize: `${18 * SCALE}px`, color: '#fffaf0',
       shadow: { offsetX: 0, offsetY: 2 * SCALE, color: 'rgba(20,20,40,0.5)', blur: 8 * SCALE, fill: true },
-    }).setOrigin(0.5).setDepth(20).setAlpha(0);
+    }).setOrigin(0, 0.5).setDepth(20).setAlpha(0);
     this.tweens.add({
       targets: this.hint, alpha: { from: 0.85, to: 0.35 },
       duration: 1100, yoyo: true, repeat: -1, delay: 1500,
@@ -205,71 +188,39 @@ export class DressingScene extends Phaser.Scene {
     });
   }
 
-  /** 让主角走到目标 x —— 位移和步态都在 update() 里按真实 dt 推进 */
-  private walkTo(targetX: number, duration: number, onDone: () => void): void {
-    this.walkSpeed = Math.abs(targetX - this.hero.c.x) / (duration / 1000);
-    this.walkTarget = targetX;
-    this.onArrive = onDone;
-  }
-
+  /**
+   * 进门:门推大 → 镜头先轻轻后撤一下再加速推进门缝(像人迈步前的那一下重心)
+   * → 暖光从门里漫出来盖满画面 → 第三幕。
+   */
   private enter(): void {
     if (this.entering) return;
     this.entering = true;
 
-    this.tweens.add({ targets: [this.welcome, this.hint], alpha: 0, duration: 300 });
-    this.swingDoor(DOOR_WIDE, 900, 'Sine.easeOut');
+    this.tweens.add({ targets: [this.welcome, this.hint], alpha: 0, duration: 350 });
+    this.swingDoor(DOOR_WIDE, 1100, 'Sine.easeOut');
+    playDoorCreak(1);
 
-    /* 主角走到门前 → 缩小淡出(走进门的透视)→ 相机推门 → 暖光漫过画面 */
-    this.walkTo(this.sx(P.door.x0 - 120), 1500, () => {
-      const s = HERO_PIX_H / RIG.height;
-      this.tweens.add({
-        targets: this.hero.c,
-        scaleX: s * 0.7 * Math.sign(this.hero.c.scaleX || 1), scaleY: s * 0.7,
-        x: this.sx(P.doorGlow.x), y: this.sy(P.heroFoot.y - 260),
-        alpha: 0, duration: 900, ease: 'Sine.easeIn',
-      });
-      this.tweens.add({ targets: this.shadow, alpha: 0, duration: 700 });
+    const cam = this.cameras.main;
+    this.tweens.killTweensOf(cam);
+    const gx = this.sx(P.doorGlow.x), gy = this.sy(P.doorGlow.y);
+    this.tweens.add({
+      targets: cam, zoom: Math.max(1.005, cam.zoom - 0.025), duration: 260, ease: 'Sine.easeOut',
+      onComplete: () => {
+        cam.pan(gx, gy, 1900, 'Cubic.easeIn');
+        cam.zoomTo(3.2, 1900, 'Cubic.easeIn');
+      },
+    });
 
-      const cam = this.cameras.main;
-      cam.pan(this.sx(P.doorGlow.x), this.sy(P.doorGlow.y), 1600, 'Sine.easeInOut');
-      cam.zoomTo(2.6, 1600, 'Sine.easeInOut');
-
-      const flood = this.add.rectangle(this.sx(P.doorGlow.x), this.sy(P.doorGlow.y),
-                                       W * 2, H * 2, 0xffe0b0, 0).setDepth(90);
-      this.tweens.add({
-        targets: flood, alpha: 1, duration: 900, delay: 800, ease: 'Quad.easeIn',
-        onComplete: () => this.scene.start('Room'),
-      });
+    const flood = this.add.rectangle(gx, gy, W * 3, H * 3, 0xffe0b0, 0).setDepth(90);
+    this.tweens.add({
+      targets: flood, alpha: 1, duration: 900, delay: 1250, ease: 'Quad.easeIn',
+      onComplete: () => this.scene.start('Room'),
     });
   }
 
   update(_time: number, delta: number): void {
     const dt = Math.min(delta / 1000, 0.05);
     this.t += dt;
-
-    /* ---- 走位与步态 ---- */
-    if (this.walkTarget !== null) {
-      const c = this.hero.c;
-      const dir = Math.sign(this.walkTarget - c.x) || 1;
-      const step = this.walkSpeed * dt;
-      if (Math.abs(this.walkTarget - c.x) <= step) {
-        c.x = this.walkTarget;
-        this.walkTarget = null;
-        this.hero.update(dt, false);
-        const done = this.onArrive; this.onArrive = undefined;
-        done?.();
-      } else {
-        c.x += step * dir;
-        this.hero.setDirection(dir);
-        this.hero.update(dt, true);
-      }
-    } else {
-      this.hero.update(dt, false);
-    }
-    if (!this.entering) {
-      this.shadow.setPosition(this.hero.c.x, this.hero.c.y + u(3));
-      this.shadow.setScale(1 + Math.abs(this.hero.c.scaleX) * 6);
-    }
 
     /* ---- 门:scaleX 直接写,tween 只负责推 doorScale ---- */
     if (this.door) this.door.scaleX = this.imgScale * this.doorScale;

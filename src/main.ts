@@ -7,6 +7,7 @@ import { RoomScene } from './scenes/RoomScene';
 import { FireplaceScene } from './scenes/FireplaceScene';
 import { DeskScene } from './scenes/DeskScene';
 import { WindowScene } from './scenes/WindowScene';
+import { AtticScene } from './scenes/AtticScene';
 
 initTouch();
 (window as any).__touch = touch;
@@ -23,6 +24,6 @@ document.fonts.ready.catch(() => {}).then(() => {
       mode: Phaser.Scale.ENVELOP,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [TitleScene, DressingScene, RoomScene, FireplaceScene, DeskScene, WindowScene],
+    scene: [TitleScene, DressingScene, RoomScene, FireplaceScene, DeskScene, WindowScene, AtticScene],
   });
 });

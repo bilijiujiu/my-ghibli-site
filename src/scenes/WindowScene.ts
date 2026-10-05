@@ -1,9 +1,30 @@
 import Phaser from 'phaser';
-import { W, H, u, SCALE } from '../config/constants';
+import { W as SW, H as SH, u, SCALE } from '../config/constants';
+import { GLASS, SILL, SASHES } from '../config/windowGlass';
+import { Sash } from '../systems/Sash';
+import { Inflow } from '../systems/Inflow';
+import { Ambience } from '../systems/Ambience';
+import { RainWindow } from '../systems/RainWindow';
 import { Achievements } from '../systems/achievements';
-import { Tree } from '../systems/Tree';
+import { PaintedTree as Tree, TREE_KEYS } from '../systems/PaintedTree';
 import { WindowLife } from '../systems/WindowLife';
 import { addGlow } from '../systems/glow';
+import { SkyGradient, addPaper, addDisc } from '../systems/paint';
+
+/**
+ * 这一幕是"推近屋里那扇拱窗":窗框、墙、油灯直接是 room.webp 的那一块(window_room.webp,
+ * 玻璃已抠空,见 tools/make_window_room.py),窗外的世界只从玻璃里透出来。
+ *
+ * 实现上用两台相机:
+ *   outCam(= cameras.main)—— 视口就是玻璃的外接矩形,只拍窗外的东西;
+ *   roomCam               —— 全屏,只拍屋里的东西(窗框原画、玻璃上的雨痕、曲柄、盆栽、提示字)。
+ * roomCam 后加,所以画在 outCam 上面;原画里玻璃之外都是不透明的,窗外只在玻璃里露出来。
+ *
+ * 窗外那部分代码沿用原来的写法,用 W/H 表示"画面宽高"——
+ * 这里把 W/H 换成玻璃区域的宽高,屋里的东西用 SW/SH(全屏)。
+ */
+const W = GLASS.w;
+const H = GLASS.h;
 
 /**
  * 窗景 · 独立全屏一幕。两个控件,一个世界:
@@ -53,15 +74,29 @@ const SEASON = [
 ];
 const SEASON_TWEEN = 900;      // 换季过渡时长 ms
 
-const HORIZON = 0.54;          // 地平线在画面高度的比例(和地景山脊对齐)
-const LAND_H = 0.46;           // 地景占画面高度的比例
+const HORIZON = 0.60;          // 地平线在画面高度的比例(竖长的拱窗,天多留一点)
+const LAND_H = 0.40;           // 地景占画面高度的比例(= 1 − HORIZON)
 const LAND_DRIFT = u(3);       // 地景横移 px/s —— 小屋在走,窗外的景就该慢慢挪
 const TREE_DRIFT = u(4);       // 树在近处,按视差走得快一点
-const TREE_BASE_Y = 0.88;
+const TREE_BASE_Y = 0.97;
 const FIREFLY_N = 34;
 
-const D = { sky: 0, star: 1, orb: 2, land: 3, fly: 5, cloud: 6,
-            fall: 7, tree: 8, bird: 9, weather: 10, tint: 11, frame: 12, ui: 20 };
+const D = { sky: 0, star: 1, orb: 2, cloud: 2.5, land: 3, fly: 5,
+            fall: 7, tree: 8, bird: 9, weather: 10, tint: 11, paper: 11.5,
+            /* 以下在 roomCam 里 */
+            glass: 12, drops: 13, frame: 14, sash: 14.5, light: 15, inflow: 16, ui: 20 };
+
+/** 透视的视点:屏幕中心,焦距按画布宽取 —— 窗扇、飘进来的东西共用这一个,透视才对得上 */
+const EYE = { x: SW / 2, y: SH * 0.48, f: SW * 0.42 };
+const OPEN_MS = 1300;
+const HINT_CLOSED = 'Click the window to open it · Crank the sun · Touch the plant for seasons · Esc to leave';
+const HINT_OPEN = 'Click the window to close it · Crank the sun · Touch the plant for seasons · Esc to leave';
+/* 云原来压在地景之上(depth 6):云比山远,地平线附近那几朵会盖住山脊。现在放回山后面。 */
+
+/** 云的贴图:从 cloud1.png 预缩出来的两朵(tools/make_clouds.py)。
+ *  原图 6752px 宽、屏幕上只显示 600px 左右 —— GPU 没有 mipmap 时缩小十倍就是最近邻抽样,
+ *  水彩笔触被抽成一格一格的像素块,这就是云看着像像素画的原因。预缩到 ~1000px 就好了。 */
+const CLOUD_KEYS = ['cloud_a', 'cloud_b'];
 
 export class WindowScene extends Phaser.Scene {
   private timeVal = 0.30;
@@ -70,7 +105,9 @@ export class WindowScene extends Phaser.Scene {
   private hasCrank = false;
   private hasCloud = false;
 
-  private sky!: Phaser.GameObjects.Graphics;
+  private sky!: SkyGradient;
+  private overcast!: Phaser.GameObjects.Rectangle;
+  private rainNow = 0;
   private landA: Phaser.GameObjects.Image[] = [];
   private landB: Phaser.GameObjects.Image[] = [];
   private landW = 0;
@@ -80,10 +117,20 @@ export class WindowScene extends Phaser.Scene {
   private treeOffset = 0;
   private life!: WindowLife;
   private tintLayer!: Phaser.GameObjects.Rectangle;
-  private frameTint!: Phaser.GameObjects.Graphics;
+  private roomCam!: Phaser.Cameras.Scene2D.Camera;
+  private glassRain!: RainWindow;
+  private dayLight!: Phaser.GameObjects.Image;
+  private roomLift!: Phaser.GameObjects.Rectangle;
+  private sashes: Sash[] = [];
+  private openVal = 0;          // 0 关 … 1 开
+  private isOpen = false;
+  private inflow!: Inflow;
+  private ambience = new Ambience();
+  private hoverGlow!: Phaser.GameObjects.Image;
+  private hint!: Phaser.GameObjects.Text;
   private sun!: Phaser.GameObjects.Container;
-  private sunCore!: Phaser.GameObjects.Arc;
-  private moon!: Phaser.GameObjects.Arc;
+  private sunCore!: Phaser.GameObjects.Image;
+  private moon!: Phaser.GameObjects.Image;
   private moonHalo!: Phaser.GameObjects.Image;
   private stars: { o: Phaser.GameObjects.Arc; th: number; ph: number }[] = [];
   private flies: { o: Phaser.GameObjects.Image; x: number; y: number; ph: number; sp: number }[] = [];
@@ -104,8 +151,15 @@ export class WindowScene extends Phaser.Scene {
   preload(): void {
     /* 素材可能不存在:失败就用占位,不报致命错 */
     for (const s of SEASON) this.load.image(s.key, `/${s.key}.webp`);
+    for (const k of TREE_KEYS) this.load.image(k, `/${k}.png`);
     this.load.image('crank_img', '/crank.png');
-    this.load.image('cloud1', '/cloud1.png');
+    this.load.image('window_room', '/window_room_open.webp');
+    this.load.image('sash_l', '/sash_l.png');
+    this.load.image('sash_r', '/sash_r.png');
+    for (const k of CLOUD_KEYS) {
+      this.load.image(k, `/${k}.webp`);
+      this.load.image(`${k}_day`, `/${k}_day.webp`);
+    }
     this.load.on('loaderror', () => { /* 忽略,create 里检测 */ });
   }
 
@@ -115,9 +169,15 @@ export class WindowScene extends Phaser.Scene {
     this.hasLand = SEASON.every(s => this.textures.exists(s.key)
       && this.textures.get(s.key).key !== '__MISSING');
     this.hasCrank = this.textures.exists('crank_img');
-    this.hasCloud = this.textures.exists('cloud1');
+    this.hasCloud = CLOUD_KEYS.every(k => [k, `${k}_day`].every(t =>
+      this.textures.exists(t) && this.textures.get(t).key !== '__MISSING'));
 
-    this.sky = this.add.graphics().setDepth(D.sky);
+    /* 窗外相机:视口 = 玻璃区域 */
+    const outCam = this.cameras.main;
+    outCam.setViewport(GLASS.x, GLASS.y, GLASS.w, GLASS.h).setScroll(0, 0);
+
+    this.sky = new SkyGradient(this, W, H);
+    this.sky.img.setDepth(D.sky);
     this.buildStars();
     this.buildSunMoon();
     this.buildLand();
@@ -128,12 +188,20 @@ export class WindowScene extends Phaser.Scene {
 
     /* 全屏色调层:把天、地、云统一到同一个时段的光里 */
     this.tintLayer = this.add.rectangle(W / 2, H / 2, W, H, 0xffffff, 0).setDepth(D.tint);
+    /* 阴雨层:下雨的时候天是灰的。原来夕阳照常金灿灿、同时下着雨,氛围自相矛盾。 */
+    this.overcast = this.add.rectangle(W / 2, H / 2, W, H, 0x56607a, 0).setDepth(D.tint);
+    /* 纸纹:整幅窗景压在同一张水彩纸上 */
+    addPaper(this, 0, 0, W, H, 0.45).setDepth(D.paper);
 
+    /* 到这里为止建的都是窗外的东西 */
+    const outside = [...this.children.list];
+
+    this.roomCam = this.cameras.add(0, 0, SW, SH);
     this.buildFrame();
     this.buildCrank();
     this.buildPlant();
 
-    this.add.text(W / 2, H - u(30), 'Crank the sun · Touch the plant for seasons · Esc to leave', {
+    this.hint = this.add.text(SW / 2, SH - u(30), HINT_CLOSED, {
       fontFamily: '"Nunito", sans-serif', fontSize: `${15 * SCALE}px`,
       color: 'rgba(255,255,255,.8)',
       shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,.6)', blur: 6, fill: true },
@@ -141,14 +209,20 @@ export class WindowScene extends Phaser.Scene {
 
     this.keys = this.input.keyboard!.addKeys('ESC') as any;
     Achievements.unlock('window', this);
-    this.cameras.main.fadeIn(500, 10, 12, 30);
+
+    const inside = this.children.list.filter(o => !outside.includes(o));
+    outCam.ignore(inside);
+    this.roomCam.ignore(outside);
+
+    outCam.fadeIn(500, 10, 12, 30);
+    this.roomCam.fadeIn(500, 10, 12, 30);
     this.render(true);
   }
 
   /* ---------- 搭场景 ---------- */
 
   private buildStars(): void {
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 55; i++) {
       const o = this.add.circle(
         Phaser.Math.Between(0, W), Phaser.Math.Between(0, Math.round(H * HORIZON)),
         Phaser.Math.FloatBetween(u(1), u(2.4)), 0xffffff, 0,
@@ -163,10 +237,10 @@ export class WindowScene extends Phaser.Scene {
        圆盘倒是该硬边 —— 太阳本来就有清晰的边缘。 */
     this.sun = this.add.container(0, 0).setDepth(D.orb);
     const halo = addGlow(this, 0, 0, u(130), 0xffce78, 0.55);
-    this.sunCore = this.add.circle(0, 0, u(36), 0xffe08a, 1);
+    this.sunCore = addDisc(this, 0, 0, u(36), 0xffe08a);
     this.sun.add([halo, this.sunCore]);
     this.moonHalo = addGlow(this, 0, 0, u(76), 0xcfd8f0, 0.34).setDepth(D.orb);
-    this.moon = this.add.circle(0, 0, u(30), 0xf0f0e2, 1).setDepth(D.orb);
+    this.moon = addDisc(this, 0, 0, u(30), 0xf0f0e2).setDepth(D.orb);
   }
 
   /**
@@ -227,9 +301,12 @@ export class WindowScene extends Phaser.Scene {
    * 它们跟着地景一起漂,只是快一点(近处的东西视差更大)。
    */
   private buildTrees(): void {
-    const scale = (H * 0.42) / 370;      // 370 ≈ 生成器长出来的树高(本地单位)
+    const treeH = H * 0.46;              // 整棵树(含树冠)在窗里的高度
     for (let i = 0; i < 2; i++) {
-      const t = new Tree(this, 0, H * TREE_BASE_Y, scale, 7 + i * 131);
+      /* 一棵近的(左三分之一处),一棵远一点、小一点的(右边),远的那棵站得高一点 —— 透视 */
+      const t = new Tree(this, 0, H * (i ? TREE_BASE_Y - 0.06 : TREE_BASE_Y), treeH * (i ? 0.62 : 1), i === 1);
+      (t as any)._home = i ? 0.84 : 0.27;
+      (t as any)._par = i ? 0.7 : 1;      // 远的那棵视差小,漂得慢
       t.c.setDepth(D.tree);
       t.fallLayer.setDepth(D.fall);
       this.trees.push(t);
@@ -248,18 +325,31 @@ export class WindowScene extends Phaser.Scene {
   }
 
   /**
-   * 云。cloud1.png 原图 6752 px 宽,画布才 2560 —— 原来 scale 0.4~0.75 等于
-   * 每"朵"云是一整条铺满屏幕、底边平直的云带,看着就是贴了张纸。
-   * 缩到 0.09~0.17(600~1150 px)才是一朵一朵的云,数量补到 5 朵。
+   * 云。两张预缩好的云轮流用,随机左右翻转,屏幕上 550~1000px 宽 ——
+   * 基本是 1:1 显示,原画的笔触全保住。不透明度拉高:吉卜力的云是"实"的,
+   * 原来 0.5 的半透明看着像一层蒙在天上的贴纸。
    */
   private buildClouds(): void {
-    for (let i = 0; i < 5; i++) {
-      const x = Phaser.Math.Between(-u(200), W + u(200));
-      const y = Phaser.Math.Between(Math.round(H * 0.06), Math.round(H * 0.34));
+    const N = 4;
+    for (let i = 0; i < N; i++) {
+      /* 横向均匀撒开再加抖动,不会几朵挤成一团 */
+      const x = (i / N) * (W + u(500)) - u(250) + Phaser.Math.Between(-u(80), u(80));
+      const y = Phaser.Math.Between(Math.round(H * 0.10), Math.round(H * 0.36));
       if (this.hasCloud) {
-        const c = this.add.image(x, y, 'cloud1').setDepth(D.cloud)
-          .setAlpha(0.5).setScale(0.09 + Math.random() * 0.08);
-        (c as any)._speed = u(3 + Math.random() * 4);
+        /* 每朵云两层:底下白天版(白云),上面原画版(黄昏粉橙)。
+           原画的云是夕阳打光的,正午也挂着橙色高光就不对了 ——
+           render() 里按太阳高度在两层之间淡入淡出。 */
+        const key = CLOUD_KEYS[i % CLOUD_KEYS.length];
+        const c = this.add.image(x, y, `${key}_day`).setDepth(D.cloud);
+        const dusk = this.add.image(x, y, key).setDepth(D.cloud);
+        /* 越低越大越快:近大远小,也给天空一点纵深 */
+        const depthF = (y - H * 0.10) / (H * 0.26);
+        const targetW = u(150 + depthF * 140) * (0.85 + Math.random() * 0.3);
+        const flip = Math.random() < 0.5;
+        c.setScale(targetW / c.width).setFlipX(flip);
+        dusk.setScale(targetW / dusk.width).setFlipX(flip);
+        (c as any)._speed = u(2 + depthF * 4 + Math.random() * 2);
+        (c as any)._dusk = dusk;
         this.clouds.push(c);
       } else {
         const c = this.add.container(x, y).setDepth(D.cloud).setAlpha(0.5);
@@ -273,20 +363,72 @@ export class WindowScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * 窗框 = room.webp 里那扇拱窗本身(玻璃已抠空)。
+   * 玻璃这层(雾感 + 顺玻璃滑下的雨痕)用的是 RoomScene 同一个 RainWindow,
+   * 屋里看是什么样,推近了还是什么样。它压在原画下面,所以只在玻璃里露出来。
+   */
   private buildFrame(): void {
-    const g = this.add.graphics().setDepth(D.frame);
-    const m = u(46);
-    g.fillStyle(0x3a2a1a, 1);
-    g.fillRect(0, 0, W, m); g.fillRect(0, H - m, W, m);
-    g.fillRect(0, 0, m, H); g.fillRect(W - m, 0, m, H);
-    g.lineStyle(u(3), 0x5a4128, 1);
-    g.strokeRect(m, m, W - m * 2, H - m * 2);
-    this.frameTint = this.add.graphics().setDepth(D.frame + 1);
+    this.glassRain = new RainWindow(this, {
+      x: GLASS.x / SCALE, y: GLASS.y / SCALE, w: GLASS.w / SCALE, h: GLASS.h / SCALE,
+    }, D.glass);
+
+    this.add.image(0, 0, 'window_room').setOrigin(0, 0)
+      .setDisplaySize(SW, SH).setDepth(D.frame);
+
+    this.buildSashes();
+
+    /* 白天的光:原画是夜里点着油灯的屋子。太阳升起来以后,
+       窗口一圈的墙和窗台该被外面的天光照亮 —— 叠一团从窗口散开的光(ADD),
+       再给整间屋子抬一点亮度。夜里两者都是 0,原画原样。 */
+    this.dayLight = addGlow(this, GLASS.x + GLASS.w / 2, GLASS.y + GLASS.h * 0.62,
+      GLASS.w * 1.25, 0xfff0d0, 0, GLASS.h * 0.8).setDepth(D.light);
+    this.roomLift = this.add.rectangle(SW / 2, SH / 2, SW, SH, 0x6a6458, 0)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(D.light);
+  }
+
+  /**
+   * 两扇可开的窗扇(下半部分)。点窗户任意处开/关,两扇错开一点时间,不会像机器一样同步。
+   * 窗扇往屋里转(内开),铰链在外侧;窗洞后面就是窗外的世界(outCam 拍的那层)。
+   */
+  private buildSashes(): void {
+    for (const key of ['sash_l', 'sash_r'] as const) {
+      const sash = new Sash(this, key, SASHES[key], EYE, u(9)).setDepth(D.sash);
+      this.sashes.push(sash);
+    }
+    const l = SASHES.sash_l, r = SASHES.sash_r;
+    const hole = { x: l.x, y: l.y, w: r.x + r.w - l.x, h: l.h };
+    this.inflow = new Inflow(this, hole, EYE, SH - u(10)).setDepth(D.inflow);
+
+    /* hover 时窗户透出一点光,告诉人这里能点 */
+    this.hoverGlow = addGlow(this, hole.x + hole.w / 2, hole.y + hole.h / 2,
+      hole.w * 0.75, 0xcfe6ff, 0, hole.h * 0.6).setDepth(D.light);
+    const hit = this.add.rectangle(hole.x + hole.w / 2, hole.y + hole.h / 2, hole.w, hole.h, 0xffffff, 0.001)
+      .setInteractive({ useHandCursor: true }).setDepth(D.ui);
+    hit.on('pointerover', () => this.tweens.add({ targets: this.hoverGlow, alpha: 0.12, duration: 200 }));
+    hit.on('pointerout', () => this.tweens.add({ targets: this.hoverGlow, alpha: 0, duration: 300 }));
+    hit.on('pointerdown', () => this.toggleWindow());
+  }
+
+  private toggleWindow(): void {
+    this.ambience.start();                  // 浏览器要求用户操作之后才能出声
+    this.isOpen = !this.isOpen;
+    this.hint.setText(this.isOpen ? HINT_OPEN : HINT_CLOSED);
+    this.tweens.killTweensOf(this.sashes);
+    this.sashes.forEach((sash, i) => {
+      this.tweens.add({
+        targets: sash, open: this.isOpen ? 1 : 0,
+        duration: OPEN_MS, delay: (this.isOpen ? i : 1 - i) * 140,
+        /* 开:先推开一点再顺势荡开,末尾轻轻回弹;关:收回来,最后"咔"一下贴合 */
+        ease: this.isOpen ? 'Back.easeOut' : 'Cubic.easeIn',
+      });
+    });
   }
 
   private buildCrank(): void {
-    const cx = W - u(110);
-    const cy = H - u(120);
+    /* 挂在窗户右边的墙上,和窗台差不多高 */
+    const cx = GLASS.x + GLASS.w + u(150);
+    const cy = SILL.y - u(150);
     this.crank = this.add.container(cx, cy).setDepth(D.ui);
 
     if (this.hasCrank) {
@@ -294,11 +436,7 @@ export class WindowScene extends Phaser.Scene {
       img.setScale(u(120) / Math.max(img.width, img.height));
       this.crank.add(img);
     } else {
-      const g = this.add.graphics();
-      g.fillStyle(0x8a6a3a, 1); g.fillCircle(0, 0, u(14));
-      g.lineStyle(u(9), 0xa8823f, 1); g.lineBetween(0, 0, u(52), -u(30));
-      g.fillStyle(0xc8a050, 1); g.fillCircle(u(52), -u(30), u(12));
-      this.crank.add(g);
+      this.crank.add(this.drawCrank());
     }
 
     const hit = this.add.circle(cx, cy, u(90), 0xffffff, 0.001)
@@ -326,37 +464,97 @@ export class WindowScene extends Phaser.Scene {
 
 
   /**
+   * 手摇曲柄:铁底座 + 黄铜摇臂 + 木把手。每个零件都是"墨线 → 固有色 → 暗面 → 高光"四遍,
+   * 和屋里原画的上色方式一致。原来是三个纯色几何形,像 UI 图标。
+   */
+  private drawCrank(): Phaser.GameObjects.Graphics {
+    const g = this.add.graphics();
+    const ink = 0x1d130c;
+    const ex = u(54), ey = -u(30);                       // 摇臂末端(把手位置)
+    const ang = Math.atan2(ey, ex), len = Math.hypot(ex, ey);
+    const nx = -Math.sin(ang), ny = Math.cos(ang);
+    const arm = (w0: number, w1: number, col: number, dx = 0, dy = 0) => {
+      g.fillStyle(col, 1);
+      g.fillPoints([
+        new Phaser.Geom.Point(dx + nx * w0, dy + ny * w0),
+        new Phaser.Geom.Point(dx + ex + nx * w1, dy + ey + ny * w1),
+        new Phaser.Geom.Point(dx + ex - nx * w1, dy + ey - ny * w1),
+        new Phaser.Geom.Point(dx - nx * w0, dy - ny * w0),
+      ], true);
+    };
+    /* 底座:一块铁圆盘,四颗铆钉 */
+    g.fillStyle(ink, 1); g.fillCircle(0, 0, u(19));
+    g.fillStyle(0x3b3532, 1); g.fillCircle(0, 0, u(17));
+    g.fillStyle(0x2a2522, 1); g.fillCircle(u(2), u(3), u(14));
+    g.fillStyle(0x6a605a, 0.8); g.fillCircle(-u(5), -u(6), u(6));
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2 + Math.PI / 4;
+      g.fillStyle(ink, 1); g.fillCircle(Math.cos(a) * u(12), Math.sin(a) * u(12), u(2.6));
+      g.fillStyle(0x8a7f76, 1); g.fillCircle(Math.cos(a) * u(12) - u(0.6), Math.sin(a) * u(12) - u(0.6), u(1.4));
+    }
+    /* 黄铜摇臂:根部粗、末端细 */
+    arm(u(6.5), u(5), ink);
+    arm(u(4.8), u(3.4), 0xb08a3e);
+    arm(u(1.8), u(1.2), 0x7a5a26, nx * u(2.2), ny * u(2.2));          // 下侧暗面
+    arm(u(1.3), u(0.9), 0xf2d58a, -nx * u(2.2), -ny * u(2.2));        // 上侧高光
+    /* 中轴螺帽 */
+    g.fillStyle(ink, 1); g.fillCircle(0, 0, u(8));
+    g.fillStyle(0xc49a4a, 1); g.fillCircle(0, 0, u(6.5));
+    g.fillStyle(0xf6e0a0, 0.9); g.fillCircle(-u(2), -u(2), u(2.4));
+    /* 木把手 */
+    g.fillStyle(ink, 1); g.fillCircle(ex, ey, u(13.5));
+    g.fillStyle(0x7a4a2a, 1); g.fillCircle(ex, ey, u(11.5));
+    g.fillStyle(0x4e2c18, 1); g.fillCircle(ex + u(2.5), ey + u(3), u(8.5));
+    g.fillStyle(0xc88a58, 0.85); g.fillEllipse(ex - u(3.5), ey - u(4), u(8), u(5));
+    void len;
+    return g;
+  }
+
+  /**
    * 窗台上的盆栽 —— 季节的控件兼指示器。
    * 摆在窗框下沿那条木边上(那本来就是死空间),几乎不占窗口。
    * 它的枝叶用的是窗外那棵树同一套生成器,只是小一号 —— 屋里屋外同一个季节,同一种植物。
    */
   private buildPlant(): void {
-    const px = u(150);
-    const potTop = H - u(52);
+    /* 摆在油灯旁边的书桌上 —— 窗台留给窗扇转开的空间 */
+    const px = u(370);
+    const potTop = u(462);
     this.plant = this.add.container(px, potTop).setDepth(D.ui);
 
     /* hover 时透出一圈暖光:不给点提示的话,没人知道这盆花能碰 */
     this.plantGlow = this.add.circle(0, -u(28), u(46), 0xffd070, 0);
     this.plant.add(this.plantGlow);
 
-    this.plantTree = new Tree(this, px, potTop - u(4), (u(60)) / 370, 401);
+    this.plantTree = new Tree(this, px, potTop + u(2), u(70));
     this.plantTree.c.setDepth(D.ui);
     this.plantTree.fallLayer.setDepth(D.ui);
 
-    /* 陶盆:压在枝干根部之上,把树根那截藏掉 */
+    /* 陶盆:压在枝干根部之上,把树根那截藏掉。
+       墨线勾边 → 陶土固有色 → 右侧背光 → 左侧一道高光 → 盆沿 → 盆土,外加窗台上一小团投影。 */
     const pot = this.add.graphics().setDepth(D.ui + 1);
-    const w0 = u(21), w1 = u(15), hgt = u(23);
-    pot.fillStyle(0x9a5b3c, 1);
-    pot.fillPoints([
-      new Phaser.Geom.Point(px - w0, potTop),
-      new Phaser.Geom.Point(px + w0, potTop),
-      new Phaser.Geom.Point(px + w1, potTop + hgt),
-      new Phaser.Geom.Point(px - w1, potTop + hgt),
-    ], true);
-    pot.fillStyle(0xb06a45, 1);
-    pot.fillRect(px - w0 - u(3), potTop - u(6), (w0 + u(3)) * 2, u(8));
-    pot.lineStyle(u(2), 0x6d3d27, 0.8);
-    pot.strokeRect(px - w0 - u(3), potTop - u(6), (w0 + u(3)) * 2, u(8));
+    const w0 = u(21), w1 = u(15), hgt = u(23), o = u(1.6);
+    const P = (x: number, y: number) => new Phaser.Geom.Point(x, y);
+    const ink = 0x1d130c;
+    pot.fillStyle(0x000000, 0.28);
+    pot.fillEllipse(px + u(4), potTop + hgt + u(1), w0 * 2.4, u(7));
+    pot.fillStyle(ink, 1);
+    pot.fillPoints([P(px - w0 - o, potTop), P(px + w0 + o, potTop),
+                    P(px + w1 + o, potTop + hgt + o), P(px - w1 - o, potTop + hgt + o)], true);
+    pot.fillStyle(0xa8603c, 1);
+    pot.fillPoints([P(px - w0, potTop), P(px + w0, potTop),
+                    P(px + w1, potTop + hgt), P(px - w1, potTop + hgt)], true);
+    pot.fillStyle(0x6e3a22, 0.75);
+    pot.fillPoints([P(px + w0 * 0.25, potTop), P(px + w0, potTop),
+                    P(px + w1, potTop + hgt), P(px + w1 * 0.2, potTop + hgt)], true);
+    pot.fillStyle(0xe2a070, 0.7);
+    pot.fillPoints([P(px - w0 * 0.72, potTop + u(2)), P(px - w0 * 0.52, potTop + u(2)),
+                    P(px - w1 * 0.45, potTop + hgt - u(3)), P(px - w1 * 0.66, potTop + hgt - u(3))], true);
+    /* 盆沿 */
+    const rx = px - w0 - u(3), rw = (w0 + u(3)) * 2, ry = potTop - u(6), rh = u(8);
+    pot.fillStyle(ink, 1); pot.fillRoundedRect(rx - o, ry - o, rw + o * 2, rh + o * 2, u(2.5));
+    pot.fillStyle(0xbc7048, 1); pot.fillRoundedRect(rx, ry, rw, rh, u(2));
+    pot.fillStyle(0x7a4028, 0.7); pot.fillRect(rx + rw * 0.6, ry + rh * 0.5, rw * 0.4 - u(1), rh * 0.5);
+    pot.fillStyle(0xf0b888, 0.65); pot.fillRect(rx + u(3), ry + u(1.5), rw * 0.45, u(1.8));
 
     /* 点击区域:比盆栽本身大一圈,好点 */
     const hit = this.add.circle(px, potTop - u(18), u(52), 0xffffff, 0.001)
@@ -385,13 +583,9 @@ export class WindowScene extends Phaser.Scene {
     const k = this.keyAt(t);
     const s = this.seasonAt(this.seasonVal);
 
-    /* 天空 */
-    this.sky.clear();
-    const bands = 50;
-    for (let i = 0; i < bands; i++) {
-      this.sky.fillStyle(this.lerpColor(k.top, k.bot, i / bands), 1);
-      this.sky.fillRect(0, (H / bands) * i, W, H / bands + 1);
-    }
+    /* 天空:下雨时整体往灰蓝里拉一点 */
+    const grey = this.rainNow * 0.45;
+    this.sky.draw(this.lerpColor(k.top, 0x4a5168, grey), this.lerpColor(k.bot, 0x8a8e9c, grey));
 
     /* 日月:绕同一条弧,相位差半天。t=0 从右侧地平线升起,0.25 到天顶,0.5 从左侧落下。 */
     this.placeOrb(this.sun, t, true);
@@ -403,31 +597,38 @@ export class WindowScene extends Phaser.Scene {
       this.landA[i].setTexture(SEASON[s.i].key).setTint(k.land);
       this.landB[i].setTexture(SEASON[s.j].key).setTint(k.land).setAlpha(s.k);
     }
-    for (const tr of this.trees) tr.setSeason(this.seasonVal, force);
+    /* 树吃和地景同一个光 —— 原来半夜地是蓝黑的、树还是正午那么亮 */
+    for (const tr of this.trees) { tr.setLight(k.land); tr.setSeason(this.seasonVal, force); }
+    /* 盆栽在屋里,只吃一半窗外的光 */
+    this.plantTree?.setLight(this.lerpColor(0xffffff, k.land, 0.5));
     this.plantTree?.setSeason(this.seasonVal, force);
 
     this.tintLayer.setFillStyle(k.tintC, 1).setAlpha(k.tintA);
 
-    /* 窗框:白天亮,夜里暗,黄昏内缘染一道橙 */
-    this.frameTint.clear();
-    const m = u(46);
-    this.frameTint.fillStyle(0x000020, k.star * 0.5);
-    this.frameTint.fillRect(0, 0, W, m); this.frameTint.fillRect(0, H - m, W, m);
-    this.frameTint.fillRect(0, 0, m, H); this.frameTint.fillRect(W - m, 0, m, H);
-    const dusk = Phaser.Math.Clamp(1 - Math.abs(t - 0.54) * 12, 0, 1);
-    if (dusk > 0.01) {
-      this.frameTint.lineStyle(u(4), 0xff9a50, dusk * 0.6);
-      this.frameTint.strokeRect(m, m, W - m * 2, H - m * 2);
-    }
+    /* 屋里吃到的天光:白天亮、黄昏偏暖、夜里没有(原画本身就是夜) */
+    const day = Phaser.Math.Clamp(1 - k.star * 1.6, 0, 1) * (1 - this.rainNow * 0.4);
+    this.dayLight.setTint(this.lerpColor(0xfff4dc, k.bot, 0.5)).setAlpha(day * 0.2);
+    this.roomLift.setAlpha(day * 0.4);
+    this.glassRain?.setIntensity(Phaser.Math.Clamp(this.rainNow * 2.2, 0, 1));
 
     /* 云:跟着天色一起被染 —— 不染的话正午的天是蓝的、云还是夕阳的粉橙,一眼假。
-       multiply 只能压暗,所以取天空底色和顶色之间偏底色的一档,正好是云受光的颜色。 */
-    const cloudTint = this.lerpColor(k.bot, k.top, 0.30);
+       云图本身就画着受光面和背光面,染色只要轻轻往天色推:白天几乎原色,
+       入夜压到天顶色,下雨再往灰里拉。 */
+    let cloudTint = this.lerpColor(0xffffff, k.bot, 0.22);
+    cloudTint = this.lerpColor(cloudTint, k.top, Phaser.Math.Clamp(k.star * 0.85, 0, 0.85));
+    cloudTint = this.lerpColor(cloudTint, 0x8a8f9e, this.rainNow * 0.5);
+    /* 黄昏味:太阳贴近地平线(不管升起还是落下)时为 1,高挂或深夜为 0 */
+    const sunElev = Math.sin(Math.PI * 2 * t);
+    const warm = Phaser.Math.Clamp(1 - Math.abs(sunElev + 0.05) / 0.55, 0, 1);
+    const cloudA = 0.62 + 0.3 * (1 - k.star);
     for (const c of this.clouds) {
       const img = c as Phaser.GameObjects.Image;
       if (img.setTint) img.setTint(cloudTint);
-      img.setAlpha(0.30 + 0.28 * (1 - k.star));
+      img.setAlpha(cloudA);
+      const dusk = (c as any)._dusk as Phaser.GameObjects.Image | undefined;
+      if (dusk) dusk.setTint(cloudTint).setAlpha(cloudA * warm);
     }
+    this.overcast.setAlpha(this.rainNow * 0.16 * (1 - k.star * 0.6));
 
     /* 星星:各自有个出场阈值,天黑到一定程度才逐颗亮起来 */
     for (const st of this.stars) {
@@ -439,7 +640,7 @@ export class WindowScene extends Phaser.Scene {
     }
   }
 
-  private placeOrb(orb: Phaser.GameObjects.Container | Phaser.GameObjects.Arc,
+  private placeOrb(orb: Phaser.GameObjects.Container | Phaser.GameObjects.Image,
                    phase: number, isSun: boolean): void {
     const a = Math.PI * 2 * phase;
     const elev = Math.sin(a);
@@ -451,7 +652,7 @@ export class WindowScene extends Phaser.Scene {
     if (isSun) {
       const low = 1 - Phaser.Math.Clamp(elev / 0.4, 0, 1);
       this.sun.setScale(1 + low * 0.5);
-      this.sunCore.setFillStyle(this.lerpColor(0xffe08a, 0xff6a3a, low));
+      this.sunCore.setTint(this.lerpColor(0xffe08a, 0xff6a3a, low));
     }
   }
 
@@ -507,23 +708,53 @@ export class WindowScene extends Phaser.Scene {
       this.landOffset = (this.landOffset + LAND_DRIFT * dt) % (this.landW * 2);
       this.layoutLand();
     }
-    const period = W * 2;
-    this.treeOffset = (this.treeOffset + TREE_DRIFT * dt) % period;
+    /* 树跟着小屋的行走慢慢往后退,走出画面就从另一边绕回来。
+       周期取 1.8 个窗宽:出画和入画之间留一段空,不会刚消失又冒出来。 */
+    const period = W * 1.8;
+    this.treeOffset += TREE_DRIFT * dt;
     for (let i = 0; i < this.trees.length; i++) {
-      let x = (i * W - this.treeOffset) % period;
-      if (x < -W) x += period;
+      const tr = this.trees[i] as any;
+      let x = (tr._home * W - this.treeOffset * tr._par) % period;
+      if (x < -W * 0.4) x += period;
       this.trees[i].c.x = x;
       this.trees[i].update(dt, tsec, H);
       this.trees[i].spawnFall(s.leaf * 7, dt, H);
     }
     this.plantTree.update(dt, tsec * 0.6, H);
 
-    this.life.update(dt, s.rain, s.snow, s.bird, s.dir, light);
+    /* 阵雨:雨量随时间起落,一阵一阵的,不是从头下到尾。
+       雨大的时候天色、云一起变灰(render 里读 rainNow)。 */
+    const shower = Phaser.Math.Clamp(0.55 + 0.6 * Math.sin(tsec * 0.09) + 0.25 * Math.sin(tsec * 0.23 + 1.7), 0, 1);
+    const rain = s.rain * shower;
+    if (Math.abs(rain - this.rainNow) > 0.01) { this.rainNow = rain; this.render(); }
+    this.life.update(dt, rain, s.snow, s.bird, s.dir, light);
+    this.glassRain.update(dt);
+
+    /* 窗扇:开度取两扇的平均。玻璃上的雾和水珠随开窗淡掉;开着窗屋里更亮。 */
+    for (const sh of this.sashes) sh.layout();
+    this.openVal = this.sashes.reduce((a, b) => a + Phaser.Math.Clamp(b.open, 0, 1), 0) / this.sashes.length;
+    const o = this.openVal;
+    this.glassRain.setIntensity(Phaser.Math.Clamp(this.rainNow * 2.2, 0, 1), 1 - o * 0.85);
+    const day = 1 - k.star;
+    /* 飘进屋的东西:按季节、天气、昼夜,再乘开窗程度 */
+    const inflowRates = {
+      rain: rain * 120 * o,
+      snow: s.snow * 26 * o,
+      petal: (s.i === 0 ? 1 - s.k : s.i === 3 ? s.k : 0) * 2.2 * o * (1 - rain),
+      leaf: s.leaf * 2.6 * o,
+      fly: s.fly * Phaser.Math.Clamp((k.star - 0.45) * 2.6, 0, 1) * 1.4 * o,
+    };
+    this.inflow.update(dt, tsec, inflowRates, day);
+    /* 风:开窗时盆栽被风吹得摇得更厉害 */
+    this.plantTree.c.rotation += Math.sin(tsec * 2.1) * 0.035 * o + Math.sin(tsec * 5.3) * 0.014 * o;
+    this.ambience.update(dt, o, 0.4 + 0.4 * Math.sin(tsec * 0.05) ** 2, rain);
 
     for (const c of this.clouds) {
       const o = c as any;
       o.x += o._speed * dt;
-      if (o.x > W + u(80)) o.x = -u(80);
+      const half = (o.displayWidth ?? u(160)) / 2;
+      if (o.x - half > W) o.x = -half;
+      if (o._dusk) o._dusk.x = o.x;
     }
 
     for (const st of this.stars) {
@@ -546,6 +777,8 @@ export class WindowScene extends Phaser.Scene {
     if (this.leaving) return;
     this.leaving = true;
     this.cameras.main.fadeOut(500, 10, 12, 30);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Room'));
+    this.roomCam.fadeOut(500, 10, 12, 30);
+    this.ambience.stop();
+    this.roomCam.once('camerafadeoutcomplete', () => this.scene.start('Room'));
   }
 }

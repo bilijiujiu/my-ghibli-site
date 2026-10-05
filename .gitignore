@@ -5,3 +5,6 @@ dist/
 
 # 被替换掉的旧素材,留着只是保险
 public/*.unused
+
+# 深度估计模型(tools/make_depth.py 用,66MB,从 MiDaS 的 GitHub release 下载)
+tools/models/

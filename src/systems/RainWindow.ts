@@ -46,17 +46,18 @@ export class RainWindow {
   private fog: Phaser.GameObjects.Graphics;
   private drops: Drop[] = [];
 
-  constructor(scene: Phaser.Scene, rect: WindowRect) {
+  /** @param depth 雾层的深度,雨滴在它上面一层。RoomScene 用默认的 50;WindowScene 要压在窗框原画下面。 */
+  constructor(scene: Phaser.Scene, rect: WindowRect, depth = 50) {
     this.scene = scene;
     this.rect = rect;
 
     /* 玻璃雾层:一层淡淡的冷色,叠在窗户上制造"隔着玻璃"感 */
-    this.fog = scene.add.graphics().setDepth(50);
+    this.fog = scene.add.graphics().setDepth(depth);
     this.fog.fillStyle(0xaac4e0, GLASS_FOG);
     this.fog.fillRect(u(rect.x), u(rect.y), u(rect.w), u(rect.h));
 
     /* 雨滴绘制层 */
-    this.g = scene.add.graphics().setDepth(51);
+    this.g = scene.add.graphics().setDepth(depth + 1);
 
     /* 初始化雨滴,随机分布在窗户里 */
     for (let i = 0; i < DROP_COUNT; i++) {
@@ -111,6 +112,15 @@ export class RainWindow {
         Object.assign(d, this.spawn(false));
       }
     }
+  }
+
+  /**
+   * @param k     雨势 0..1:雨滴层的透明度
+   * @param glass 玻璃还在不在 0..1(WindowScene 开窗时窗扇转走了,玻璃上的雾和水珠一起淡掉)
+   */
+  setIntensity(k: number, glass = 1): void {
+    this.g.setAlpha(Phaser.Math.Clamp(k, 0, 1) * glass);
+    this.fog.setAlpha(Phaser.Math.Clamp(glass, 0, 1));
   }
 
   destroy(): void {
