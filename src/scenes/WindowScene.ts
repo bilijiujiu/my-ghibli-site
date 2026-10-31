@@ -165,6 +165,16 @@ export class WindowScene extends Phaser.Scene {
 
   create(): void {
     this.leaving = false;
+    /* Phaser 每次进这一幕用的是同一个场景对象,类字段只在第一次构造时初始化。
+       不在这里清空的话,第二次进来这些数组里还是上一次离开时已经销毁的对象,
+       一碰就报 "Cannot read properties of undefined (reading 'sys')",窗户也点不动了。 */
+    this.landA = []; this.landB = []; this.landW = 0; this.landOffset = 0; this.hills = undefined;
+    this.trees = []; this.treeOffset = 0;
+    this.stars = []; this.flies = []; this.clouds = [];
+    this.sashes = []; this.openVal = 0; this.isOpen = false;
+    this.draggingCrank = false; this.crankAngle = 0;
+    this.rainNow = 0;
+    this.ambience = new Ambience();
     /* 加载失败时 Phaser 会塞一张 __MISSING 占位纹理进来,得一并排掉 */
     this.hasLand = SEASON.every(s => this.textures.exists(s.key)
       && this.textures.get(s.key).key !== '__MISSING');

@@ -3,7 +3,7 @@ import { W, H, u, SCALE } from '../config/constants';
 import { Dialog } from '../systems/dialog';
 import { HeroRig } from '../entities/HeroRig';
 import { BookOverlay } from '../systems/BookOverlay';
-import { RainWindow } from '../systems/RainWindow';
+import { MoonBeam } from '../systems/MoonBeam';
 import { Achievements, AchievementPanel } from '../systems/achievements';
 import { playStairs } from '../systems/AtticAudio';
 
@@ -21,8 +21,16 @@ const ROOM_H = 620;
 const ROOM_W = ROOM_H * 4;
 const MOVE_SPEED = 320;
 const START_X = 150;
-const START_Y = 520;
-const BOUNDS = { minX: 120, maxX: ROOM_W - 120, minY: 480, maxY: 570 };
+/*
+ * 可行走带:只许走在所有家具前面那一条空地板上。
+ * 在 room.webp 上量了一遍物件压在地板上的最低点(逻辑坐标):
+ *   左墙护墙板 ~565 · 柴堆 ~553 · 壁炉炉台 ~540 · 书堆 ~555 · 书桌腿 ~545 · 楼梯脚 ~575。
+ * 原来脚底能走到 535,等于站在炉台和书堆上面。现在脚底限制在 580~606:
+ * 永远在所有东西的前面,画角色时直接压在它们上面也不会穿帮。
+ */
+const FOOT_MIN = 580, FOOT_MAX = 606;
+const START_Y = 590 - 55;
+const BOUNDS = { minX: 120, maxX: ROOM_W - 120, minY: FOOT_MIN - 55, maxY: FOOT_MAX - 55 };
 
 const HERO_SCALE = 0.48;
 /*
@@ -38,13 +46,15 @@ const WIN = { x: 1616, y: 274, w: 1792 - 1616, h: 437 - 274 };
 
 /* 记住离开房间时的位置。首次为 null(开场从左侧进入),从子场景返回时恢复。 */
 let savedPos: { x: number; y: number } | null = null;
+/** 从哪个子场景回来的(决定进场方式)。null = 从门廊第一次进屋 */
+let returnFrom: string | null = null;
 
 export class RoomScene extends Phaser.Scene {
   private pos = { x: START_X, y: START_Y };
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private dialog!: Dialog;
   private book!: BookOverlay;
-  private rain!: RainWindow;
+  private moon!: MoonBeam;
   private achPanel!: AchievementPanel;
   private rig!: HeroRig;
   private heroShadow!: Phaser.GameObjects.Ellipse;
@@ -65,7 +75,11 @@ export class RoomScene extends Phaser.Scene {
   create(): void {
     /* 从子场景返回时恢复上次位置;首次开场用起点 */
     this.pos = savedPos ? { ...savedPos } : { x: START_X, y: START_Y };
+    /* 旧存档里的位置可能在新的可行走带外面 */
+    this.pos.y = Phaser.Math.Clamp(this.pos.y, BOUNDS.minY, BOUNDS.maxY);
     this.climbing = false;
+    /* 场景对象会被复用:从壁炉/书桌/窗户/阁楼回来时,上一次的提示气泡已经销毁了,别留在表里 */
+    this.prompts = new Map();
 
     this.paintScene();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,E') as any;
@@ -77,13 +91,29 @@ export class RoomScene extends Phaser.Scene {
     this.buildHero();
     this.buildHUD();
 
-    this.rain = new RainWindow(this, WIN);
+    /* 窗玻璃上原来是一颗颗匀速往下掉的"雨滴",像串珠门帘;换成从窗口照进来的月光 */
+    this.moon = new MoonBeam(this, WIN, 503);
 
     const cam = this.cameras.main;
     cam.setBounds(0, 0, u(ROOM_W), u(ROOM_H));
-    cam.scrollX = 0;
+    /* 镜头直接落在主角身上。原来固定从 0 开始,每次从子场景回来镜头都要从屋子最左边滑过来 */
+    cam.scrollX = Phaser.Math.Clamp(u(this.pos.x) - W / 2, 0, u(ROOM_W) - W);
     cam.scrollY = 0;
-    cam.fadeIn(900, 255, 224, 176);
+    /* 进场:
+       - 第一次从门廊进来:门里漫出来的暖光是白里透橙的,从这个颜色淡入,接得上;
+       - 从子场景回来:那边都是淡出到暗色,这里也从暗色淡入。原来一律从奶白色淡入,
+         于是"暗 → 一下子亮白 → 屋里",看着就是一次白屏闪烁,很刺眼。
+       - 从窗户回来:镜头先推在窗户上,再慢慢拉回整个屋子 —— 正好是"看窗外"那一下的反向。 */
+    if (returnFrom === null) {
+      cam.fadeIn(900, 255, 224, 176);
+    } else {
+      cam.fadeIn(700, 10, 12, 20);
+      if (returnFrom === 'Window') {
+        cam.setZoom(1.6);
+        cam.zoomTo(1, 1100, 'Sine.easeOut');
+      }
+    }
+    returnFrom = null;
 
     if (DEBUG) this.buildDebug();
   }
@@ -96,6 +126,7 @@ export class RoomScene extends Phaser.Scene {
     if (this.climbing) return;
     this.climbing = true;
     savedPos = { ...this.pos };
+    returnFrom = 'Attic';
     Achievements.unlock('stairs', this);
     playStairs(7, 0.3);
     const cam = this.cameras.main;
@@ -125,7 +156,43 @@ export class RoomScene extends Phaser.Scene {
     return u(logicalY + HERO_FOOT_DROP);
   }
 
+  /**
+   * 环境光:人物原图是白天光下的水彩,放进夜里的屋子就像贴上去的。
+   * 从 room.webp 上按 x 取一列"人物身后那一段墙"的平均颜色(壁炉边偏暖橙、窗户边偏冷蓝),
+   * 归一化成一个乘法色,走到哪就染上哪里的光。只取一次,存成表。
+   */
+  private ambient: number[] = [];
+  private buildAmbient(): void {
+    const src = this.textures.get('room').getSourceImage() as HTMLImageElement;
+    const N = 128;
+    const cv = document.createElement('canvas');
+    cv.width = N; cv.height = 32;
+    const ctx = cv.getContext('2d')!;
+    /* 取墙面中下部到地板这一段(逻辑 y 300~600),人物主要就落在这一段前面 */
+    const sy = src.height * 300 / ROOM_H, sh = src.height * 300 / ROOM_H;
+    ctx.drawImage(src, 0, sy, src.width, sh, 0, 0, N, 32);
+    const d = ctx.getImageData(0, 0, N, 32).data;
+    this.ambient = [];
+    for (let i = 0; i < N; i++) {
+      let r = 0, g = 0, b = 0;
+      for (let j = 0; j < 32; j++) { const k = (j * N + i) * 4; r += d[k]; g += d[k + 1]; b += d[k + 2]; }
+      const m = Math.max(r, g, b) || 1;
+      /* 只要色相、不要明暗:按最亮的通道归一,再往白色拉回 55%,免得染得太重 */
+      const mix = (c: number) => Math.round(255 * (0.55 + 0.45 * (c / m)) * 0.94);
+      this.ambient.push((mix(r) << 16) | (mix(g) << 8) | mix(b));
+    }
+  }
+  private ambientAt(x: number): number {
+    if (!this.ambient.length) return 0xffffff;
+    const f = Phaser.Math.Clamp(x / ROOM_W, 0, 1) * (this.ambient.length - 1);
+    const i = Math.floor(f), t = f - i;
+    const a = Phaser.Display.Color.IntegerToColor(this.ambient[i]);
+    const b = Phaser.Display.Color.IntegerToColor(this.ambient[Math.min(i + 1, this.ambient.length - 1)]);
+    return Phaser.Display.Color.GetColor(a.red + (b.red - a.red) * t, a.green + (b.green - a.green) * t, a.blue + (b.blue - a.blue) * t);
+  }
+
   private buildHero(): void {
+    this.buildAmbient();
     /* 影子跟脚底同一条线 —— 旧代码把影子画在 pos.y,比脚底高了 55px,
        所以那团椭圆其实浮在小腿肚位置,人看着不像踩在地上。 */
     this.heroShadow = this.add.ellipse(u(START_X), this.footY(START_Y), u(56), u(13), 0x000000, 0.25)
@@ -139,13 +206,13 @@ export class RoomScene extends Phaser.Scene {
   private buildInteractives(): void {
     this.interactives = [
       { x: 609, y: 520, range: 150, label: 'Warm up by the fire',
-        action: () => { savedPos = { ...this.pos }; this.scene.start('Fireplace'); } },
+        action: () => { savedPos = { ...this.pos }; returnFrom = 'Fireplace'; this.scene.start('Fireplace'); } },
       { x: 1157, y: 520, range: 150, label: 'Browse the shelf',
         action: () => { Achievements.unlock('book', this); this.book.open(); } },
       { x: 1425, y: 525, range: 140, label: 'Look at the desk',
-        action: () => { savedPos = { ...this.pos }; this.scene.start('Desk'); } },
+        action: () => { savedPos = { ...this.pos }; returnFrom = 'Desk'; this.scene.start('Desk'); } },
       { x: 1720, y: 520, range: 150, label: 'Look outside',
-  action: () => { savedPos = { ...this.pos }; this.scene.start('Window'); } },
+  action: () => { savedPos = { ...this.pos }; returnFrom = 'Window'; this.scene.start('Window'); } },
       { x: 2142, y: 525, range: 170, label: 'Go upstairs',
         action: () => this.climbStairs() },
     ];
@@ -214,7 +281,7 @@ export class RoomScene extends Phaser.Scene {
     const k = this.keys;
     const touch = (window as any).__touch || {};
 
-    this.rain.update(dt);
+    this.moon.update(dt);
 
     if (this.achPanel.isOpen) {
       this.rig.update(dt, false);
@@ -248,6 +315,12 @@ export class RoomScene extends Phaser.Scene {
 
     this.rig.c.setPosition(u(this.pos.x), this.footY(this.pos.y));
     this.heroShadow.setPosition(u(this.pos.x), this.footY(this.pos.y));
+    /* 近大远小:往前走(y 变大)稍微大一点,幅度 ±3% —— 可行走带很窄,够了 */
+    const depthF = (this.pos.y - (BOUNDS.minY + BOUNDS.maxY) / 2) / (BOUNDS.maxY - BOUNDS.minY);
+    const persp = 1 + depthF * 0.06;
+    this.rig.c.setScale(HERO_SCALE * persp * Math.sign(this.rig.c.scaleX || 1), HERO_SCALE * persp);
+    this.heroShadow.setScale(persp);
+    this.rig.silhouette(this.ambientAt(this.pos.x), 1);
 
     const cam = this.cameras.main;
     cam.scrollX += (u(this.pos.x) - W / 2 - cam.scrollX) * 0.08;

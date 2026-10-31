@@ -30,33 +30,75 @@ const FIRE_LEAN = u(14);
 const FLAME_W = u(330), FLAME_H = u(330);
 
 /**
- * 炉架上的木柴(画布像素,a→b 是一根柴的两端,r 是半径)。
- * 前两根进场就在(冷的,等你点);后面四根是按 E 一根根添上去的,交叉着越摞越高。
- * front=true 的压在火焰前面,false 的在火焰后面 —— 火是从柴缝里钻出来的,不是浮在柴上。
+ * 炉架(画布像素,从 fireplace_bg 上量的)。炉架是一块透视里的长方形:
+ * 后沿从 (960,845) 到 (1380,812),前沿从 (1100,920) 到 (1580,883);两根前立柱在 x≈1078–1118 和 1548–1595。
+ * 木柴必须躺在两根前立柱之间 —— 原来的柴从 x=1085 画起,直接横穿了左边的铁柱子。
  */
-const LOGS = [
-  { a: [1085, 846], b: [1455, 832], r: 25, front: false },
-  { a: [1125, 884], b: [1430, 870], r: 27, front: true },
-  { a: [1165, 830], b: [1400, 858], r: 21, front: true },
-  { a: [1175, 852], b: [1395, 820], r: 21, front: false },
-  { a: [1205, 812], b: [1365, 838], r: 18, front: true },
-  { a: [1195, 834], b: [1355, 806], r: 18, front: false },
-];
-const BASE_LOGS = 2;
+const GRATE = {
+  backY: (x: number) => 845 + (x - 960) * (-33 / 420),
+  frontY: (x: number) => 920 + (x - 1100) * (-37 / 480),
+  postL: [1076, 1120] as const, postR: [1546, 1597] as const,
+};
+/** 炉架面上某个深度 t(0 = 后沿,1 = 前沿)、某个 x 处的 y */
+const grateY = (x: number, t: number) => GRATE.backY(x) + (GRATE.frontY(x) - GRATE.backY(x)) * t;
+
+interface Log { a: number[]; b: number[]; r: number; t: number; layer: number }
+/**
+ * 柴堆:3-2-1 的金字塔,每根都和炉架前沿平行。
+ *   底层三根:后 / 中 / 前,贴着炉架面;
+ *   中层两根:各架在底层两根之间的那道槽里;
+ *   顶层一根:架在中层两根之间。
+ * 进场就有底层三根,按 E 依次添中层两根、顶层一根。上层的柴压在下层的缝里,
+ * 和下层只是前后遮挡、不会互相"插"进去 —— 原来是两根交叉画在同一个高度上,看着就是穿模。
+ * 近处的柴半径大一点(透视),左右两端收在两根前立柱之间。
+ */
+function buildLogs(): Log[] {
+  const x0 = 1146, x1 = 1522;                    // 前排两端,离两根立柱各留一点空
+  const row = (t: number, r: number, lift: number, layer: number): Log => {
+    const shift = (1 - t) * -22;                 // 越靠后,整根往左挪一点(炉架后沿比前沿偏左)
+    const ax = x0 + shift + (1 - t) * 14, bx = x1 + shift - (1 - t) * 14;
+    return { a: [ax, grateY(ax, t) - r - lift], b: [bx, grateY(bx, t) - r - lift], r, t, layer };
+  };
+  const B = [row(0.10, 21, 0, 0), row(0.48, 23, 0, 0), row(0.86, 25, 0, 0)];
+  /* 架在两根柴之间:深度取两者中间,高度抬到能同时搭在两根上的位置 */
+  const onTop = (p: Log, q: Log, r: number, layer: number): Log => {
+    const t = (p.t + q.t) / 2;
+    const gap = Math.abs(((p.a[1] + p.b[1]) - (q.a[1] + q.b[1])) / 2);   // 两根下层柴的屏幕间距
+    const base = Math.min((p.a[1] + q.a[1]) / 2, (p.b[1] + q.b[1]) / 2);
+    const lift = Math.sqrt(Math.max(0, (p.r + r) ** 2 - (gap / 2) ** 2)) * 0.9;
+    const L = row(t, r, 0, layer);
+    const dy = ((p.a[1] + q.a[1]) / 2 - lift) - L.a[1];
+    L.a[1] += dy; L.b[1] += dy;
+    void base;
+    return L;
+  };
+  const M = [onTop(B[0], B[1], 22, 1), onTop(B[1], B[2], 23, 1)];
+  const T = onTop(M[0], M[1], 21, 2);
+  /* 每根长短、左右位置都错开一点,不像一排一模一样的铅笔 */
+  const jitter = [[6, -4], [-10, 8], [14, -12], [-8, -18], [18, 4], [-4, -24]];
+  return [...B, ...M, T].map((L, i) => {
+    const [da, db] = jitter[i];
+    const k = (L.b[1] - L.a[1]) / (L.b[0] - L.a[0]);
+    return { ...L, a: [L.a[0] + da, L.a[1] + da * k], b: [L.b[0] + db, L.b[1] + db * k] };
+  });
+}
+const LOGS = buildLogs();
+const BASE_LOGS = 3;
+/** 深度 t 大于它的柴压在火焰前面,其余在火焰后面 —— 火是从柴缝里钻出来的 */
+const FRONT_T = 0.3;      // 只有最后面那根底柴在火后面,其余都压在火前面,火从柴堆顶上冒出来
 
 /* ===== 火势 ===== */
-const MAX_LOGS = 4;          // 最多加几次柴
+const MAX_LOGS = LOGS.length - BASE_LOGS;   // 最多加几次柴(3:中层两根 + 顶层一根)
 const LIT_INTENSITY = 0.35;  // 刚点燃后渐旺到的初始小火强度
 const IGNITE_TRIES = 2;      // 需要点几下才点着(第2下着)
 
 export class FireplaceScene extends Phaser.Scene {
   private emberEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
   private flame!: Phaser.GameObjects.Shader;
-  private logBack!: Phaser.GameObjects.Graphics;
-  private logFront!: Phaser.GameObjects.Graphics;
-  private emberBack!: Phaser.GameObjects.Graphics;
-  private emberFront!: Phaser.GameObjects.Graphics;
-  private cracks: { log: number; pts: number[][] }[] = [];
+  /** 每根柴一对图层:木头 + 它自己的余烬。按深度排好,遮挡关系才对 */
+  private grateGlow?: Phaser.GameObjects.Image;
+  private logLayers: { log: Phaser.GameObjects.Graphics; ember: Phaser.GameObjects.Graphics;
+                       cracks: Phaser.Geom.Point[][] }[] = [];
   private lightWarm!: Phaser.GameObjects.Image;
   private lightBox!: Phaser.GameObjects.Image;
   private lightFloor!: Phaser.GameObjects.Image;
@@ -80,8 +122,8 @@ export class FireplaceScene extends Phaser.Scene {
   private igniteTries = 0;
 
   /* 火焰底部中心(屏幕像素),在炉架柴堆中间 */
-  private fireX = u(635);
-  private fireY = u(432);
+  private fireX = 1334;       // 柴堆正中
+  private fireY = 872;
 
   constructor() { super('Fireplace'); }
 
@@ -164,11 +206,8 @@ export class FireplaceScene extends Phaser.Scene {
     this.lightWarm = addGlow(this, this.fireX, this.fireY - u(60), u(620), 0xff9a50, 0, u(430)).setDepth(7);
     this.lightFloor = addGlow(this, this.fireX, this.fireY + u(80), u(420), 0xffa25a, 0, u(90)).setDepth(7);
 
-    this.logBack = this.add.graphics().setDepth(2);
-    this.emberBack = this.add.graphics().setDepth(2.1).setBlendMode(Phaser.BlendModes.ADD);
     this.flame = addFireShader(this, this.fireX, this.fireY + u(4), FLAME_W, FLAME_H).setDepth(3);
-    this.logFront = this.add.graphics().setDepth(4);
-    this.emberFront = this.add.graphics().setDepth(4.1).setBlendMode(Phaser.BlendModes.ADD);
+    this.buildGrateFront();
     this.drawLogs();
 
     /* 火星:很小、很亮,往上飘的时候左右晃 */
@@ -189,22 +228,62 @@ export class FireplaceScene extends Phaser.Scene {
   }
 
   /**
-   * 画木柴(静态,添柴时重画)。画法和原画的柴堆一致:
-   * 墨线 → 树皮固有色 → 上沿一道受光 → 下沿压暗 → 一头露出年轮截面。
-   * 同时给每根柴预生成几条"裂缝",点着以后裂缝里透出余烬的红光(每帧在 ember 层重画)。
+   * 炉架的前沿横杆和两根前立柱,从背景原画里原样抠出来,盖在木柴上面。
+   * 木柴躺在炉架里,前面那根横杆和两根柱子本来就该挡住柴的下沿和两头 —— 不盖的话,
+   * 柴是画在整张背景上面的,炉架被柴压住,看着就像柴穿过了铁架子。
+   */
+  private buildGrateFront(): void {
+    const key = 'grate_front';
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const tex = this.textures.createCanvas(key, W, H);
+    if (!tex) return;
+    const ctx = tex.getContext();
+    const src = this.textures.get('fireplace_bg').getSourceImage() as HTMLImageElement;
+    const sc = Math.min(W / src.width, H / src.height);
+    const ox = (W - src.width * sc) / 2, oy = (H - src.height * sc) / 2;
+    ctx.save();
+    ctx.beginPath();
+    /* 前沿横杆:沿着前沿那条斜线,上下各留一点 */
+    const fx0 = GRATE.postL[0], fx1 = GRATE.postR[1];
+    ctx.moveTo(fx0, GRATE.frontY(fx0) - 4); ctx.lineTo(fx1, GRATE.frontY(fx1) - 4);
+    ctx.lineTo(fx1, GRATE.frontY(fx1) + 14); ctx.lineTo(fx0, GRATE.frontY(fx0) + 14);
+    ctx.closePath();
+    /* 立柱不用抠:柴的两端已经收在两根立柱之间,碰不到。抠了反而会把柱子周围没被火照亮的石头
+       一起盖上来,火一亮就看得见一个方框。 */
+    ctx.clip();
+    ctx.drawImage(src, ox, oy, src.width * sc, src.height * sc);
+    ctx.restore();
+    tex.refresh();
+    this.add.image(0, 0, key).setOrigin(0, 0).setDepth(4.9);
+    /* 横杆也该被火照亮:叠一层和炉膛光一样的暖光(只在横杆那一条) */
+    this.grateGlow = addGlow(this, this.fireX, GRATE.frontY(this.fireX) + 5, u(230), 0xff7a2e, 0, u(40))
+      .setDepth(4.95);
+  }
+
+  /**
+   * 画木柴(添柴时重画)。画法和原画的柴堆一致:
+   * 墨线 → 树皮固有色 → 上沿一道受光 → 下沿压暗 → 右端露出年轮截面。
+   * 每根柴一个图层,深度按(前后 t,上下 layer)排:后面的先画,上层的压在同一排下层的上面;
+   * 深度 t > FRONT_T 的在火焰前面(depth 4.x),其余在火焰后面(depth 2.x)。
+   * 每根柴还预生成几条"裂缝",点着以后裂缝里透出余烬的红光,画在紧贴这根柴的上一层。
    */
   private drawLogs(): void {
+    for (const l of this.logLayers) { l.log.destroy(); l.ember.destroy(); }
+    this.logLayers = [];
     const n = BASE_LOGS + this.logs;
-    this.logBack.clear(); this.logFront.clear();
-    this.cracks = [];
     const ink = 0x1a120c;
     const P = (x: number, y: number) => new Phaser.Geom.Point(x, y);
-    const rng = new Phaser.Math.RandomDataGenerator(['logs']);
-    for (let i = 0; i < n; i++) {
+    const order = [...Array(n).keys()].sort((i, j) =>
+      (LOGS[i].t + LOGS[i].layer * 0.001) - (LOGS[j].t + LOGS[j].layer * 0.001));
+    order.forEach((i, rank) => {
       const L = LOGS[i];
-      const g = L.front ? this.logFront : this.logBack;
+      const front = L.layer > 0 || L.t > FRONT_T;
+      const base = (front ? 4 : 2) + rank * 0.02;
+      const g = this.add.graphics().setDepth(base);
+      const ember = this.add.graphics().setDepth(base + 0.01).setBlendMode(Phaser.BlendModes.ADD);
+      const rng = new Phaser.Math.RandomDataGenerator([`log${i}`]);   // 每根柴自己的种子,添柴时别的柴不会变样
       const [ax, ay] = L.a, [bx, by] = L.b;
-      const r = L.r * 1.2;
+      const r = L.r;
       const len = Math.hypot(bx - ax, by - ay);
       const nx = -(by - ay) / len, ny = (bx - ax) / len;         // 法线(朝下)
       const quad = (o0: number, o1: number) => [
@@ -234,32 +313,38 @@ export class FireplaceScene extends Phaser.Scene {
       for (let k = 1; k <= 3; k++) g.strokeEllipse(bx, by, r * 1.3 * k / 3.6, r * 2 * k / 3.6);
 
       /* 余烬裂缝:贴着下半截,折线 */
+      const cracks: Phaser.Geom.Point[][] = [];
       for (let k = 0; k < 3; k++) {
-        const pts: number[][] = [];
+        const pts: Phaser.Geom.Point[] = [];
         let f = 0.12 + rng.frac() * 0.6;
-        let o = r * (0.1 + rng.frac() * 0.6);
+        let o = r * (0.1 + rng.frac() * 0.5);
         for (let m = 0; m < 4; m++) {
-          pts.push([ax + (bx - ax) * f + nx * o, ay + (by - ay) * f + ny * o]);
-          f += 0.03 + rng.frac() * 0.05; o += (rng.frac() - 0.5) * r * 0.4;
+          pts.push(P(ax + (bx - ax) * f + nx * o, ay + (by - ay) * f + ny * o));
+          f += 0.03 + rng.frac() * 0.05; o += (rng.frac() - 0.5) * r * 0.3;
         }
-        this.cracks.push({ log: i, pts });
+        cracks.push(pts);
       }
-    }
+      this.logLayers.push({ log: g, ember, cracks });
+    });
+    /* 火焰的根跟着柴堆的顶走:柴越摞越高,火从更高的地方冒出来,不会被新添的柴整个盖住 */
+    let top = Infinity;
+    for (let i = 0; i < n; i++) top = Math.min(top, (LOGS[i].a[1] + LOGS[i].b[1]) / 2);
+    this.flame?.setY(Math.min(this.fireY + u(4), top + 12));
   }
 
   /** 每帧:余烬裂缝随火势和闪烁明暗 */
   private drawEmbers(): void {
-    this.emberBack.clear(); this.emberFront.clear();
     const I = this.intensity;
-    if (I < 0.02) return;
-    for (const c of this.cracks) {
-      const g = LOGS[c.log].front ? this.emberFront : this.emberBack;
-      const a = Phaser.Math.Clamp(I * 1.4, 0, 1) * (0.55 + 0.45 * this.flick);
-      const pts = c.pts.map(p => new Phaser.Geom.Point(p[0], p[1]));
-      g.lineStyle(u(3.2), 0xff5a1e, a * 0.55);
-      g.strokePoints(pts);
-      g.lineStyle(u(1.2), 0xffc070, a);
-      g.strokePoints(pts);
+    const a = Phaser.Math.Clamp(I * 1.4, 0, 1) * (0.55 + 0.45 * this.flick);
+    for (const l of this.logLayers) {
+      l.ember.clear();
+      if (I < 0.02) continue;
+      for (const pts of l.cracks) {
+        l.ember.lineStyle(u(3.2), 0xff5a1e, a * 0.55);
+        l.ember.strokePoints(pts);
+        l.ember.lineStyle(u(1.2), 0xffc070, a);
+        l.ember.strokePoints(pts);
+      }
     }
   }
 
@@ -390,6 +475,7 @@ export class FireplaceScene extends Phaser.Scene {
     this.flame.setUniform('uFlicker.value', this.flick);
     this.flame.setUniform('uLean.value', 0.12 + 0.05 * Math.sin(this.clock * 0.7));
     this.lightBox.setAlpha(glow * 0.55);
+    this.grateGlow?.setAlpha(glow * 0.45);
     this.lightWarm.setAlpha(glow * 0.42);
     this.lightFloor.setAlpha(glow * 0.32);
     /* 光源在晃,光晕中心也跟着轻轻晃 */

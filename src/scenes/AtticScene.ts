@@ -23,7 +23,9 @@ import { addGlow } from '../systems/glow';
  * 交互点坐标在 src/config/attic.ts,是底图的归一化坐标。
  */
 
-const DEBUG = false;          // 打开后点画面会在控制台打印归一化坐标,标定交互点用
+const DEBUG = false;
+/** 台灯灯泡在底图上的归一化位置 —— 进场时颜色从这里往外渗 */
+const LAMP = { x: 0.452, y: 0.40 };          // 打开后点画面会在控制台打印归一化坐标,标定交互点用
 let scannedThisVisit = false;
 
 export class AtticScene extends Phaser.Scene {
@@ -47,7 +49,7 @@ export class AtticScene extends Phaser.Scene {
 
   preload(): void {
     this.load.image('attic_bg', '/attic_bg.webp');
-    this.load.image('attic_depth', '/attic_depth.png');   // tools/make_depth.py 生成
+    this.load.image('attic_lines', '/attic_lines.png');   // 原画的墨线,tools/make_lines.py 生成
     ProcessWall.preload(this);
   }
 
@@ -79,8 +81,9 @@ export class AtticScene extends Phaser.Scene {
       this.showSpots();
     } else {
       /* 着色器盖在底图上,扫描完再撤掉 */
-      this.scan = new ScanReveal(this, this.bgKey, 'attic_depth', this.bg.x, this.bg.y, this.bg.w, this.bg.h,
-        { x: sp.x - this.bg.x, y: sp.y - this.bg.y });
+      this.scan = new ScanReveal(this, this.bgKey, 'attic_lines', this.bg.x, this.bg.y, this.bg.w, this.bg.h,
+        { x: sp.x - this.bg.x, y: sp.y - this.bg.y },
+        { x: LAMP.x * this.bg.w, y: LAMP.y * this.bg.h });
       this.scan.shader.setDepth(1);
       this.scan.setProgress(0);
       this.hint.setText('Something is blinking in the corner. Click it.');
@@ -114,9 +117,9 @@ export class AtticScene extends Phaser.Scene {
       onUpdate: () => {
         this.scan?.setProgress(prog.p, this.clock);
         /* 马达声只跟扫描头转的那一段(时间轴前 55%) */
-        this.scanSound.setProgress(Math.min(1, prog.p / 0.55));
-        if (prog.p > 0.55 && this.scanning) { this.scanning = false; this.scanSound.finish(); }
-        if (prog.p > 0.62) this.hint.setText('');
+        this.scanSound.setProgress(Math.min(1, prog.p / ScanReveal.BEAM_END));
+        if (prog.p > ScanReveal.BEAM_END && this.scanning) { this.scanning = false; this.scanSound.finish(); }
+        if (prog.p > ScanReveal.BEAM_END) this.hint.setText('');
       },
       onComplete: () => {
         this.scan?.shader.destroy();
