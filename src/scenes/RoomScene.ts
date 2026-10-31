@@ -224,15 +224,21 @@ export class RoomScene extends Phaser.Scene {
     for (const it of this.interactives) {
       const anchorY = bubbleY[it.x] ?? (it.y - 180);
       const c = this.add.container(u(it.x), u(anchorY) - u(60)).setDepth(900).setAlpha(0);
-      const bubble = this.add.circle(0, 0, u(18), 0xffffff, 0.95);
-      const e = this.add.text(0, 0, 'E', {
-        fontFamily: '"Nunito", sans-serif',
-        fontSize: `${17 * SCALE}px`, fontStyle: 'bold', color: '#333',
+      /* 按键提示:墨线描边的小键帽,半透明暗底,跟画风一致 */
+      const bubble = this.add.graphics();
+      bubble.fillStyle(0x1c1006, 0.45);
+      bubble.fillRoundedRect(-u(14), -u(14), u(28), u(28), u(6));
+      bubble.lineStyle(u(1.5), 0xf7e8c6, 0.9);
+      bubble.strokeRoundedRect(-u(14), -u(14), u(28), u(28), u(6));
+      const e = this.add.text(0, -u(1), 'E', {
+        fontFamily: '"Cormorant Garamond", serif', fontStyle: 'bold',
+        fontSize: `${20 * SCALE}px`, color: '#f7e8c6',
+        shadow: { offsetX: 0, offsetY: u(1), color: 'rgba(28,16,6,0.9)', blur: u(6), fill: true },
       }).setOrigin(0.5);
-      const label = this.add.text(0, u(30), it.label, {
-        fontFamily: '"Nunito", sans-serif',
-        fontSize: `${14 * SCALE}px`, color: '#fff',
-        backgroundColor: 'rgba(0,0,0,.6)', padding: { x: 10, y: 4 },
+      const label = this.add.text(0, u(20), it.label, {
+        fontFamily: '"Cormorant Garamond", serif', fontStyle: 'italic bold',
+        fontSize: `${19 * SCALE}px`, color: '#f7e8c6',
+        shadow: { offsetX: 0, offsetY: u(1), color: 'rgba(28,16,6,0.95)', blur: u(10), fill: true },
       }).setOrigin(0.5, 0);
       c.add([bubble, e, label]);
       this.prompts.set(it, c);

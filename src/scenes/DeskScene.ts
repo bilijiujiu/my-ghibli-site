@@ -3,6 +3,8 @@ import { W, H, u, SCALE } from '../config/constants';
 import { PhoneOverlay } from '../systems/PhoneOverlay';
 import { RecordPlayerOverlay } from '../systems/RecordPlayerOverlay';
 import { Achievements, AchievementPanel } from '../systems/achievements';
+import { addGlow } from '../systems/glow';
+import { addInkLabel, showInkLabel } from '../systems/InkLabel';
 
 /**
  * 桌子近景 · 独立一幕。俯视桌面,四样物件各是一个入口。
@@ -29,10 +31,10 @@ interface Hotspot {
 }
 
 const HOTSPOTS: Hotspot[] = [
-  { key: 'guitar', x: 667, y: 305, r: 180, label: '音乐' },
-  { key: 'album',  x: 281, y: 291, r: 150, label: '照片' },
+  { key: 'guitar', x: 667, y: 305, r: 180, label: 'Music' },
+  { key: 'album',  x: 281, y: 291, r: 150, label: 'Photos' },
   { key: 'phone',  x: 1108, y: 427, r: 90,  label: 'Social' },
-  { key: 'coffee', x: 892, y: 181, r: 90,  label: '闲话' },
+  { key: 'coffee', x: 892, y: 181, r: 90,  label: 'Small talk' },
 ];
 
 export class DeskScene extends Phaser.Scene {
@@ -90,16 +92,19 @@ export class DeskScene extends Phaser.Scene {
       const zone = this.add.circle(u(h.x), u(h.y), u(h.r), 0xffffff, 0.001)
         .setDepth(10).setInteractive({ useHandCursor: true });
 
-      /* 悬停:淡淡高亮圈 */
-      const ring = this.add.circle(u(h.x), u(h.y), u(h.r), 0xffe0a0, 0)
-        .setStrokeStyle(u(3), 0xffe0a0, 0).setDepth(9);
+      /* 悬停:物件被台灯照亮似的透出一层暖光,上方浮出手写标签(不画硬边圆圈) */
+      const glow = addGlow(this, u(h.x), u(h.y), u(h.r) * 1.25, 0xffd9a0, 0).setDepth(9);
+      const label = addInkLabel(this, u(h.x), u(h.y) - u(h.r) * 0.55, h.label, 24).setDepth(11);
 
       zone.on('pointerover', () => {
-        this.tweens.add({ targets: ring, alpha: 1, duration: 200 });
-        ring.setStrokeStyle(u(3), 0xffe0a0, 0.8);
+        this.tweens.killTweensOf(glow);
+        this.tweens.add({ targets: glow, alpha: 0.32, duration: 260, ease: 'Sine.easeOut' });
+        showInkLabel(this, label, true);
       });
       zone.on('pointerout', () => {
-        this.tweens.add({ targets: ring, alpha: 0, duration: 200 });
+        this.tweens.killTweensOf(glow);
+        this.tweens.add({ targets: glow, alpha: 0, duration: 220 });
+        showInkLabel(this, label, false);
       });
       zone.on('pointerdown', () => this.openItem(h.key));
     }
@@ -115,8 +120,8 @@ export class DeskScene extends Phaser.Scene {
 
   private buildHUD(): void {
     this.add.text(W / 2, H - u(50), 'Esc to leave', {
-      fontFamily: '"Nunito", sans-serif',
-      fontSize: `${16 * SCALE}px`, color: 'rgba(255,240,220,.85)',
+      fontFamily: '"Cormorant Garamond", serif', fontStyle: 'italic',
+      fontSize: `${19 * SCALE}px`, color: 'rgba(247,232,198,.9)',
       shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,.7)', blur: 6, fill: true },
     }).setOrigin(0.5).setDepth(20);
   }

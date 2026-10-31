@@ -154,7 +154,10 @@ def repair(region, remove):
     游戏里也只会露出肢体边缘一道月牙,那里的颜色是和边界对齐的,看不出接缝。
     """
     hole = (cv2.dilate(remove, np.ones((7, 7), np.uint8)) & region).astype(np.uint8)
-    inner = cv2.erode(region, np.ones((11, 11), np.uint8))       # 别把轮廓墨线拉进来
+    # 别把左右轮廓墨线拉进来。只做横向收缩:补布料是逐行左右取样的,
+    # 上一版用 11×11 连上下边也收掉了,躯干最底下几行(衬衫下摆)取不到样本,
+    # 手臂那截没被抹掉,下摆上就留了一条肉色横杠。
+    inner = cv2.erode(region, np.ones((1, 11), np.uint8))
     out = rgb.copy().astype(np.float32)
 
     for y in np.where(hole.any(axis=1))[0]:
@@ -262,8 +265,10 @@ rig["parts"]["head"] = emit("head", head_geo, core_head, NECK)
 
 # ══ 手臂 ════════════════════════════════════════════════════════════════
 # 肘部同心接缝:上臂止于 disc(ELBOW,R) 之外,前臂补满 disc(ELBOW,R+3)。
-arm_up_raw = m_arm & above(ELBOW[1] + 80) & (1 - disc(ELBOW, R_ELBOW))
-arm_lo_raw = m_arm & below(ELBOW[1] - 80)
+# 和膝盖同理:上臂严格止于肘部水平线。上一版上下各多留 80px,
+# 前臂那截多出来的上段屈肘时会甩到上臂外面,露出一块方形的肉色(穿模)。
+arm_up_raw = m_arm & above(ELBOW[1]) & (1 - disc(ELBOW, R_ELBOW))
+arm_lo_raw = m_arm & below(ELBOW[1])
 
 # 近侧手臂压在完整躯干之上 —— 底下已经补成干净布料,旋转不可能露出背景,
 # 圆盖只需消掉肩部那条直裁边,剩下交给羽化。
@@ -279,16 +284,21 @@ rig["parts"]["arm_upper_far"] = emit("arm_upper_far", far_up, arm_up_raw & (1 - 
                                      SHOULDER, tint=FAR)
 
 # 圆盖必须完全不透明:它填的是上臂让出来的那块圆,一旦被羽化成半透明就会透出背景
-arm_lo = arm_lo_raw | disc(ELBOW, R_ELBOW + 3)
-core_arm_lo = (arm_lo_raw & below(ELBOW[1] + 20)) | disc(ELBOW, R_ELBOW + 3)
+arm_hull = cv2.dilate(m_arm, np.ones((5, 5), np.uint8))
+elbow_cap = disc(ELBOW, R_ELBOW + 3) & arm_hull
+arm_under = hideable(m_arm & above(ELBOW[1]) & (1 - elbow_cap), ELBOW,
+                     (near_up & far_up).astype(np.uint8), MAX_ELBOW)
+arm_lo = arm_lo_raw | elbow_cap | arm_under
+core_arm_lo = (arm_lo_raw & below(ELBOW[1] + 20)) | elbow_cap
 rig["parts"]["arm_lower"] = emit("arm_lower", arm_lo, core_arm_lo, ELBOW)
 rig["parts"]["arm_lower_far"] = emit("arm_lower_far", arm_lo, core_arm_lo, ELBOW, tint=FAR)
 
 # ══ 腿 ══════════════════════════════════════════════════════════════════
 # 膝部同心接缝,和肘部同理。另外画稿里手掌压在大腿上,得先抹掉。
 leg_rgb = repair(m_leg, m_arm)
-thigh_raw = m_leg & above(KNEE[1] + 120) & (1 - disc(KNEE, R_KNEE))
-shin_raw = m_leg & below(KNEE[1] - 120)
+# 大腿严格止于膝盖水平线(圆盖处挖空)。上一版留到膝下 120px:
+# 那截其实是小腿,却跟着大腿转、还画在小腿之上,屈膝时就在膝后戳出一块(穿模)。
+thigh_raw = m_leg & above(KNEE[1]) & (1 - disc(KNEE, R_KNEE))
 
 r_hip = float(np.clip(inscribed(HIP, ((torso_geo | m_leg) > 0).astype(np.uint8)) - 3, 10, 110))
 r_hip = min(r_hip, inscribed(HIP, m_all) - 2)
@@ -297,8 +307,14 @@ core_thigh = thigh_raw & (1 - torso_geo)
 rig["parts"]["thigh"] = emit("thigh", thigh, core_thigh, HIP, src=leg_rgb)
 rig["parts"]["thigh_far"] = emit("thigh_far", thigh, core_thigh, HIP, src=leg_rgb, tint=FAR)
 
-shin = shin_raw | disc(KNEE, R_KNEE + 3)
-core_shin = (shin_raw & below(KNEE[1] + 20)) | disc(KNEE, R_KNEE + 3)
+# 小腿 = 膝下整段 ∪ 膝部圆盖 ∪ 膝上"转到最大角度仍藏在大腿后面"的垫底(约束 3)。
+# 上一版膝上直接多留 120px:屈膝时那截绕膝反向甩到大腿前面,膝盖前就鼓出一个包。
+# 圆盖也要限制在腿的轮廓内,否则站着不动就有一块圆弧露在裤腿外。
+leg_hull = cv2.dilate(m_leg, np.ones((5, 5), np.uint8))
+knee_cap = disc(KNEE, R_KNEE + 3) & leg_hull
+shin_under = hideable(m_leg & above(KNEE[1]) & (1 - knee_cap), KNEE, thigh, MAX_KNEE)
+shin = (m_leg & below(KNEE[1])) | knee_cap | shin_under
+core_shin = (m_leg & below(KNEE[1] + 20)) | knee_cap
 rig["parts"]["shin"] = emit("shin", shin, core_shin, KNEE, src=leg_rgb)
 rig["parts"]["shin_far"] = emit("shin_far", shin, core_shin, KNEE, src=leg_rgb, tint=FAR)
 

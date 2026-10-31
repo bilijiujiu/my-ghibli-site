@@ -7,6 +7,7 @@ import { ScannerSound, playStairs } from '../systems/AtticAudio';
 import { ProjectCard } from '../systems/ProjectCard';
 import { ProcessWall } from '../systems/ProcessWall';
 import { addGlow } from '../systems/glow';
+import { addInkLabel, showInkLabel } from '../systems/InkLabel';
 
 /**
  * 阁楼工作室 · 从 RoomScene 的楼梯上来。
@@ -142,17 +143,14 @@ export class AtticScene extends Phaser.Scene {
       const glow = addGlow(this, p.x, p.y, r * 1.1, 0xffe2a8, 0).setDepth(8);
       this.tweens.add({ targets: glow, alpha: { from: 0.10, to: 0.22 }, duration: 1300 + Math.random() * 500,
         yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: Math.random() * 800 });
-      const label = this.add.text(p.x, p.y - r - u(16), s.label, {
-        fontFamily: '"Nunito", sans-serif', fontSize: `${15 * SCALE}px`, color: '#1e1610', fontStyle: 'bold',
-        backgroundColor: 'rgba(250,244,230,0.95)', padding: { x: u(10), y: u(5) },
-      }).setOrigin(0.5, 1).setDepth(25).setAlpha(0);
+      const label = addInkLabel(this, p.x, p.y - r - u(10), s.label).setDepth(25);
       const hit = this.add.circle(p.x, p.y, r, 0xffffff, 0.001).setInteractive({ useHandCursor: true }).setDepth(24);
       hit.on('pointerover', () => {
-        this.tweens.add({ targets: label, alpha: 1, y: p.y - r - u(22), duration: 160 });
+        showInkLabel(this, label, true);
         glow.setScale(glow.scaleX * 1.15);
       });
       hit.on('pointerout', () => {
-        this.tweens.add({ targets: label, alpha: 0, y: p.y - r - u(16), duration: 160 });
+        showInkLabel(this, label, false);
         glow.setScale(glow.scaleX / 1.15);
       });
       hit.on('pointerdown', () => this.activate(s.id));

@@ -40,17 +40,18 @@ export const PROJECTS: Record<string, Project> = {
   superauto: {
     id: 'superauto',
     title: 'SuperAuto USA',
-    meta: 'Owner & web lead · Shopify e-commerce · Tukwila, WA',
-    problem: 'An auto parts store lives or dies by whether a customer can find the part that fits their car in a few clicks.',
+    meta: 'Front-end, UI/UX & product · Shopify auto parts store · Tukwila, WA',
+    // 数据来自 Shopify Analytics,Jun 22–Aug 23 2026 对比前一期 Apr 20–Jun 21 2026。
+    // 只用比例和流量,不放营收金额;上线前跟 Wilson 确认可以公开。
+    problem: 'One summer the dashboard showed traffic up 284% and conversion down 78%. Was the store broken, or was the data?',
     did: [
-      'Built and designed the Shopify storefront, including landing pages and the shop-by-brand search.',
-      'Designed a Window Visors page with a vehicle fitment finder, a before/after comparison slider and product video sections.',
-      'Unified typography, buttons and product cards into one consistent UI system across pages.',
-      'Runs day-to-day e-commerce operations alongside the site work.',
+      'Broke the funnel down by location, referrer and device, and traced ~306K of 429K sessions to one direct, desktop source in Singapore that slipped past the bot filter.',
+      'Recomputed without it: conversion ~0.86% vs 1.14% the period before, a real but far smaller dip. Checkout completion held steady (33% vs 36%).',
+      'Compared landing pages: an install guide grew from 51 to 1,004 sessions with zero add-to-carts, while top product pages reached cart about twice as often as top collection pages (3.0% vs 1.5%).',
+      'Built the Shopify storefront: shop-by-brand search, a fitment-finder visor page, and one shared UI system across pages.',
     ],
-    // TODO(Harry):补真实数字,比如改版前后的转化率、客单价、月订单量
-    result: 'TODO: add a measurable result (conversion, orders, or time saved).',
-    tags: ['Shopify', 'HTML/CSS', 'JavaScript', 'UX', 'E-commerce'],
+    result: 'Turned an alarming headline number into three next steps: filter that source out of reporting, add "shop this part" links inside install guides, and send search traffic to product pages.',
+    tags: ['Shopify Analytics', 'Funnel analysis', 'Segmentation', 'UX', 'E-commerce'],
     // TODO(Harry):填店铺网址
     links: [],
   },
