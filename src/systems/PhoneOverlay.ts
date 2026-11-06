@@ -23,7 +23,7 @@ interface AppIcon {
 
 const APPS: AppIcon[] = [
   { key: 'instagram', label: 'Instagram', texture: 'icon_instagram', url: '#' },
-  { key: 'email',     label: '邮箱',       texture: 'icon_gmail',     url: '#' },
+  { key: 'email',     label: 'Email',      texture: 'icon_gmail',     url: '#' },
   { key: 'github',    label: 'GitHub',    texture: 'icon_github',    url: '#' },
   { key: 'linkedin',  label: 'LinkedIn',  texture: 'icon_handshake', url: '#' },
 ];
@@ -231,7 +231,7 @@ export class PhoneOverlay {
         if (app.url && app.url !== '#') {
           window.open(app.url, '_blank');
         } else {
-          console.log('链接待填:', app.key);
+          console.log('Link not set yet:', app.key);
         }
       });
     });

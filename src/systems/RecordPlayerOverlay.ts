@@ -22,9 +22,9 @@ interface Track {
 }
 
 const TRACKS: Track[] = [
-  { title: '第一首', note: '这首是……(占位)', file: '/song1.mp3' },
-  { title: '第二首', note: '这首是……(占位)', file: '/song2.mp3' },
-  { title: '第三首', note: '这首是……(占位)', file: '/song3.mp3' },
+  { title: 'Track One', note: 'About this song… (coming soon)', file: '/song1.mp3' },
+  { title: 'Track Two', note: 'About this song… (coming soon)', file: '/song2.mp3' },
+  { title: 'Track Three', note: 'About this song… (coming soon)', file: '/song3.mp3' },
 ];
 
 const DISC_R = 150;   // 唱片半径(逻辑像素)
@@ -186,7 +186,7 @@ export class RecordPlayerOverlay {
 
   private playAudio(): void {
     if (!this.audio) return;
-    this.audio.play().catch(err => console.log('播放失败(可能音频文件还没放):', err));
+    this.audio.play().catch(err => console.log('Playback failed (audio file may be missing):', err));
     this.setPlaying(true);
   }
 

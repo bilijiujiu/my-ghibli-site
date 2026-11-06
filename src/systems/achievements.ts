@@ -67,7 +67,7 @@ export class Achievements {
     const set = this.load();
     if (set.has(id)) return;   // 已解锁,不重复
     const def = ACHIEVEMENTS.find(a => a.id === id);
-    if (!def) { console.warn('未知成就:', id); return; }
+    if (!def) { console.warn('Unknown achievement:', id); return; }
     set.add(id);
     this.save();
     new AchievementToast(scene, def);

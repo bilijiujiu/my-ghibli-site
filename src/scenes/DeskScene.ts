@@ -128,7 +128,7 @@ export class DeskScene extends Phaser.Scene {
 
   /* ---------- DEBUG:点画面显示坐标 ---------- */
   private buildDebug(): void {
-    this.coordText = this.add.text(u(20), u(20), 'DEBUG: 点物件获取坐标', {
+    this.coordText = this.add.text(u(20), u(20), 'DEBUG: click an object to get its coordinates', {
       fontFamily: 'monospace',
       fontSize: `${16 * SCALE}px`, color: '#0f8',
       backgroundColor: 'rgba(0,0,0,.85)', padding: { x: 12, y: 8 },

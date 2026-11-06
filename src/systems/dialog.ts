@@ -23,7 +23,7 @@ export class Dialog {
       s.add.rectangle(W / 2, H / 2, 560, 230, 0xf7efdc).setStrokeStyle(3, 0x8a6b4a),
       s.add.text(W / 2, H / 2 - 76, title, { fontSize: '22px', fontStyle: 'bold', color: '#4a3826' }).setOrigin(0.5),
       s.add.text(W / 2, H / 2 - 32, body, { fontSize: '15px', color: '#5a4a38', wordWrap: { width: 480 }, lineSpacing: 8 }).setOrigin(0.5, 0),
-      s.add.text(W / 2, H / 2 + 88, '按 E 关闭', { fontSize: '13px', color: '#9a8468' }).setOrigin(0.5),
+      s.add.text(W / 2, H / 2 + 88, 'Press E to close', { fontSize: '13px', color: '#9a8468' }).setOrigin(0.5),
     ]);
     this.g = g;
   }
