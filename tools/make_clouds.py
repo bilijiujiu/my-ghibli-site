@@ -15,7 +15,7 @@ import numpy as np
 import cv2
 from PIL import Image
 
-SRC = "public/cloud1.png"
+SRC = "public/cloud1.webp"
 im = np.array(Image.open(SRC).convert("RGBA")).astype(np.float32)
 rng = np.random.RandomState(3)
 

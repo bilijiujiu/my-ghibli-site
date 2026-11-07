@@ -23,8 +23,8 @@ interface AppIcon {
 
 const APPS: AppIcon[] = [
   { key: 'instagram', label: 'Instagram', texture: 'icon_instagram', url: '#' },
-  { key: 'email',     label: 'Email',      texture: 'icon_gmail',     url: '#' },
-  { key: 'github',    label: 'GitHub',    texture: 'icon_github',    url: '#' },
+  { key: 'email',     label: 'Email',      texture: 'icon_gmail',     url: 'mailto:hanzong@uw.edu' },
+  { key: 'github',    label: 'GitHub',    texture: 'icon_github',    url: 'https://github.com/bilijiujiu' },
   { key: 'linkedin',  label: 'LinkedIn',  texture: 'icon_handshake', url: '#' },
 ];
 

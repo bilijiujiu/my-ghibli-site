@@ -3,12 +3,12 @@ import { W, H, u, SCALE } from '../config/constants';
 
 /**
  * Open book overlay that fills most of the screen and shows the resume. Multiple spreads; click the edges to turn pages.
- * Background is book_open.png; text is placed in the blank areas of both pages using page-relative ratios.
+ * Background is book_open.webp; text is placed in the blank areas of both pages using page-relative ratios.
  *
  * Usage:
  *   this.book = new BookOverlay(this);
  *   this.book.open(); / this.book.isOpen / this.book.close()
- * preload: this.load.image('book_open', '/book_open.png');
+ * preload: this.load.image('book_open', '/book_open.webp');
  *
  * Page turning: click the outer edge of the right page for the next spread, the left page for the previous one.
  */
@@ -65,11 +65,10 @@ const SPREADS: Spread[] = [
       { t: 'text', s: 'Expected Dec 2026', soft: true, size: 12 },
       { t: 'gap' },
       { t: 'header', s: 'Skills' },
-      { t: 'text', s: 'Python · SQL · JavaScript · Java · R', soft: true, size: 13 },
-      { t: 'text', s: 'React · HTML/CSS · Firebase · Shopify', soft: true, size: 13 },
-      { t: 'text', s: 'Figma · GitHub · Excel · Blender', soft: true, size: 13 },
-      { t: 'text', s: 'Data & Funnel Analysis · Product Mgmt', soft: true, size: 13 },
-      { t: 'text', s: 'UI/UX Design · Info Architecture', soft: true, size: 13 },
+      { t: 'text', s: 'Python · SQL · JavaScript · React', soft: true, size: 13 },
+      { t: 'text', s: 'Figma · Excel · GitHub · Shopify', soft: true, size: 13 },
+      { t: 'text', s: 'Data Analysis · Product Mgmt', soft: true, size: 13 },
+      { t: 'text', s: 'UI/UX Design', soft: true, size: 13 },
     ],
   },
   /* Spread 2: most recent and relevant experience */
@@ -278,7 +277,7 @@ export class BookOverlay {
     });
   }
 
-  /** Page-fold animation using the real paper image (page_paper.png) */
+  /** Page-fold animation using the real paper image (page_paper.webp) */
   private playFold(dir: number, onDone: () => void): void {
     const halfW = this.bookW / 2 * 0.74;   // keep the tuned alignment factor
     const pageH = this.bookH * 0.70;

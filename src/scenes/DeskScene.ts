@@ -32,9 +32,10 @@ interface Hotspot {
 
 const HOTSPOTS: Hotspot[] = [
   { key: 'guitar', x: 667, y: 305, r: 180, label: 'Music' },
-  { key: 'album',  x: 281, y: 291, r: 150, label: 'Photos' },
+  /* album and coffee are hidden until their panels exist (clicking them did nothing) */
+  // { key: 'album',  x: 281, y: 291, r: 150, label: 'Photos' },
   { key: 'phone',  x: 1108, y: 427, r: 90,  label: 'Social' },
-  { key: 'coffee', x: 892, y: 181, r: 90,  label: 'Small talk' },
+  // { key: 'coffee', x: 892, y: 181, r: 90,  label: 'Small talk' },
 ];
 
 export class DeskScene extends Phaser.Scene {
@@ -48,7 +49,7 @@ export class DeskScene extends Phaser.Scene {
   constructor() { super('Desk'); }
 
   preload(): void {
-    this.load.image('desk_bg', '/desk_bg.png');
+    this.load.image('desk_bg', '/desk_bg.webp');
     this.load.image('icon_instagram', '/icon_instagram.png');
     this.load.image('icon_gmail', '/icon_gmail.png');
     this.load.image('icon_github', '/icon_github.png');

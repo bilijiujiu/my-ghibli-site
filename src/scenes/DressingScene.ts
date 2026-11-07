@@ -39,7 +39,7 @@ const DOOR_OPEN = 0.46;      // 主角走到跟前时开到这么大
 const DOOR_WIDE = 0.26;      // 进门那一下再推开一点
 /* 欢迎语左对齐、离左边留足余量。原来是以 x=260 居中,一行字宽 ~575 逻辑像素,
    左半截已经伸到画布外面;ENVELOP 缩放在宽屏上还会再裁掉两边,所以开头的 "T" 被切了。 */
-const TEXT_X = 70, TEXT_Y = 215;
+const TEXT_X = 190, TEXT_Y = 215;   // x ≥ ~150 so the text isn't cropped on 16:10 / 16:9 screens
 
 export class DressingScene extends Phaser.Scene {
 

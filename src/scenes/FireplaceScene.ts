@@ -128,7 +128,7 @@ export class FireplaceScene extends Phaser.Scene {
   constructor() { super('Fireplace'); }
 
   preload(): void {
-    this.load.image('fireplace_bg', '/fireplace_bg.png');
+    this.load.image('fireplace_bg', '/fireplace_bg.webp');
     this.makeParticleTexture();
   }
 

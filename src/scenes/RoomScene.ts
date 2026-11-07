@@ -68,8 +68,8 @@ export class RoomScene extends Phaser.Scene {
   preload(): void {
     this.load.image('room', '/room.webp');
     HeroRig.preload(this);
-    this.load.image('book_open', '/book_open.png');
-    this.load.image('page_paper', '/page_paper.png');
+    this.load.image('book_open', '/book_open.webp');
+    this.load.image('page_paper', '/page_paper.webp');
   }
 
   create(): void {
@@ -248,8 +248,9 @@ export class RoomScene extends Phaser.Scene {
   private buildHUD(): void {
     this.add.text(W / 2, H - u(24), 'WASD / Arrows to move · Press E to interact', {
       fontFamily: '"Nunito", sans-serif',
-      fontSize: `${14 * SCALE}px`, color: 'rgba(255,255,255,.85)',
-      shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,.7)', blur: 6, fill: true },
+      fontSize: `${15 * SCALE}px`, color: 'rgba(255,248,235,.95)',
+      backgroundColor: 'rgba(20,14,10,.45)', padding: { x: 14 * SCALE, y: 5 * SCALE },
+      shadow: { offsetX: 0, offsetY: SCALE, color: 'rgba(0,0,0,.6)', blur: 4 * SCALE, fill: true },
     }).setOrigin(0.5, 1).setDepth(999).setScrollFactor(0);
   }
 
